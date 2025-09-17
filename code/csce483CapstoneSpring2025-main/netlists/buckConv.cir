@@ -1,0 +1,141 @@
+* Qucs 25.1.0  C:/Users/jnucc/Desktop/buckConverter.sch
+.TRAN 1e-05s 0.001s 0.0s 1e-05s
+.PRINT TRAN V(_net5)
+.SUBCKT NMOSFETs_BSP125  gnd  _net1 _net3 _net2
+LLS _net5 _net2 7N
+LLD _net95 _net3 5N
+RRG _net4 _net11 5.5M
+RRS _net5 _net76 593M
+DD125 _net76 _net95 DMOD_D125 
+.MODEL DMOD_D125 D(Cj0=0.025n Rs=20m Tt=80n Is=300p Bv=600 N=1 M=0.5 Vj=0.7) 
+MM125 _net86 _net11 _net76 _net76 MMOD_M125   
+.MODEL MMOD_M125 NMOS(Vt0=1.972 Kp=0.185 Is=1e-14 Lambda=0 Gamma=0 Phi=0.6) 
+MM2 _net11 _net86 _net8 _net8 MMOD_M2   
+.MODEL MMOD_M2 NMOS(Vt0=0.001 Kp=1 Is=1e-14 Lambda=0 Gamma=0 Phi=0.6) 
+MM3 _net86 _net11 _net8 _net8 MMOD_M3   
+.MODEL MMOD_M3 NMOS(Vt0=0.001 Kp=1 Is=1e-14 Lambda=0 Gamma=0 Phi=0.6) 
+CCOX _net11 _net8 0.012N
+DDGD _net8 _net86 DMOD_DGD 
+.MODEL DMOD_DGD D(Cj0=0.012n M=0.409 Vj=0.981 Is=1e-15 N=1) 
+CCGS _net76 _net11 0.085N
+MMRDR _net86 _net86 _net95 _net86 MMOD_MRDR   
+.MODEL MMOD_MRDR NMOS(Vt0=-18.35 Kp=0.00175 Is=1e-14 Lambda=0 Gamma=0 Phi=0.6) 
+LLG _net4 _net1 7N
+.ENDS
+
+
+
+* Node assignments
+*                 non-inverting input
+*                 |  inverting input
+*                 |  |  positive supply
+*                 |  |  |  negative supply
+*                 |  |  |  |  output
+*                 |  |  |  |  |
+
+
+
+
+  
+
+
+* LM319 80ns High Speed Voltage Comparator
+*
+* CONNECTIONS :
+* 1 NON-INVERTING INPUT
+* 2 INVERTING INPUT
+* 3 POSITIVE POWER SUPPLY
+* 4 NEGATIVE POWER SUPPLY
+* 5 OUTPUT
+*
+**********************************************************
+.SUBCKT LM319_sub 2 1 44 55 33
+EVCCP 4 0 44 0 1.0
+EVCCN 5 0 55 0 1.0
+VREADIO 3 33 DC 0
+R_ICCSAT_HIGH ICC_OUT_HIGH 0 1k
+R_ICCSAT_LOW ICC_OUT_LOW 0 1k
+G_ICCSAT 44 55 VALUE={IF(V(3)>(V(44)+V(55))/2, V(Icc_out_high), V(Icc_out_low) ) }
+E_ICCSAT_HIGH ICC_OUT_HIGH 0 VALUE={4E-4*V(44,55)}
+E_ICCSAT_LOW ICC_OUT_LOW 0 VALUE={1E-3 + 1E-4*V(44,55)}
+G_IOUT_SINKED 55 0 VALUE={IF (V(1)<V(2), 0, I(VreadIo))}
+.MODEL MDTH D IS=1E-11 KF=1.050321E-32 CJO=10F
+* INPUT STAGE
+CIP 2 5 1.000000E-12
+CIN 1 5 1.000000E-12
+EIP 102 0 2 0 1
+VIO 10 102 880U
+EIN 16 0 1 0 1
+RIP 10 11 6.500000E+01
+RIN 15 16 6.500000E+01
+RIS 11 15 1.939046E+02
+DIP 11 12 MDTH 400E-12
+DIN 15 14 MDTH 400E-12
+VOFP 12 13 DC 0.000000E+00
+VOFN 13 14 DC 0
+IPOL 13 0 100E-06
+CPS 11 15 3.7E-10
+DINN 17 13 MDTH 400E-12
+VIN 17 5 2.000000E+00
+DINR 15 18 MDTH 400E-12
+VIP 4 18 2.000000E+00
+FCP1 4 0 VOFP 80 
+FCP2 0 4 VOFN 80
+FCN1 0 5 VOFP 30
+FCN2 5 0 VOFN 30 
+FIBP 2 0 VOFN 3E-03
+FIBN 0 1 VOFP 3E-03
+* AMPLIFYING STAGE
+RG1 5 19 2.85E+05
+RG2 4 19 2.85E+05
+DOP 19 25 MDTH 400E-12
+VOP 4 25 1.097
+DON 24 19 MDTH 400E-12
+VON 24 5 1.097
+FIP 0 19 VOFP -104 
+FIN 0 19 VOFN -104
+EOUT 26 5 19 5 1 
+.MODEL NMOD NPN(IS=0.1E-09 BF=1500)
+RBOUT 27 26 800K
+QOUT 103 27 28 28 NMOD
+RCEOUT 103 28 15.02E+07
+REOUT 28 5 20
+RSOUT 3 0 1E+12
+VNUL 3 103 0
+*
+.ENDS LM319_sub
+
+.SUBCKT VoltageComparators_LM319  gnd _net0 _net2 _net1 _net4 _net3 
+X1 _net0 _net2 _net1 _net4 _net3 LM319_sub
+.ENDS
+
+.param Fs=300e3
+XT1 0  vgate vsource _net1 NMOSFETs_BSP125
+XT2 0  vgate2 vsource 0 NMOSFETs_BSP125
+I1 _net5 0 DC 0 PULSE(0 1 3m 1n 1n 1m 6m) AC 0
+XSUB1 0  _net8 _net7 fiveV negFiveV _net9 VoltageComparators_LM319
+XCMP1 0  _net9 _net10 fiveV negFiveV U4 VoltageComparators_LM319
+V4 _net10 0 DC 0 PULSE(0 1.8 0 {1/(2*Fs)} {1/(2*Fs)} 1n {1/Fs}) AC 0
+V2 _net1 _net0 DC 0 PULSE(0 5 1m 1n 1n 1m 6m) AC 0
+V6 fiveV 0 DC 5
+ESRC2 vgate2 0 0 U4 -1
+V5 negFiveV 0 DC -5V
+ESRC1 vgate vsource 0 U4 1
+R1 vsource _net2  0.410 tc1=0.0 tc2=0.0 
+L1 _net2 _net3  21.67E-6 
+R2 _net3 _net4  0.0082 tc1=0.0 tc2=0.0 
+C1 0 _net4  4.69E-6 
+R3 _net3 _net5  0.0001 tc1=0.0 tc2=0.0 
+R4 0 _net5  3.3 tc1=0.0 tc2=0.0 
+R5 _net5 _net7  4116.51 tc1=0.0 tc2=0.0 
+C2 _net6 _net5  2.2E-9 
+R6 _net7 _net6  207.13 tc1=0.0 tc2=0.0 
+R7 0 _net7  1764.22 tc1=0.0 tc2=0.0 
+V3 _net8 0 DC 1.2
+R8 _net11 _net7  1438.62 tc1=0.0 tc2=0.0 
+C4 _net11 _net9  6.67E-9 
+C3 _net7 _net9  1.25E-9 
+V1 _net0 0 DC 23.4
+
+
+.END

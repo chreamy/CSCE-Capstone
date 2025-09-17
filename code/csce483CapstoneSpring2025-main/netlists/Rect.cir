@@ -1,0 +1,84 @@
+* Qucs 25.1.0  
+
+* LM7805 model. 
+*
+*                   In   GND  Out
+.SUBCKT LM7805_sub  1    2    3
+*
+QT6   23  10  2   Q_NPN 0.1
+QT7   5   4   10  Q_NPN 0.1
+QT5   7   6   5   Q_NPN 0.1
+QT1   1   9   8   Q_NPN 0.1
+QT3   11  8   7   Q_NPN 0.1
+QT2   11  13  12  Q_NPN 0.1
+QT17  1   15  14  Q_NPN 10
+C2    10  23      4P
+R16   12  5       500
+R12   16  2       12.1K
+QT18  17  23  16  Q_NPN 0.1
+D1    18  19  	 D_D 
+R11   20  21      850
+R5    22  3       100
+QT14  24  18  2   Q_NPN 0.1
+R21   6   2       2.67K
+R20   3   6       640
+DZ2   25  26      D_5V1 
+R19   1   26      16K
+R18   14  3       250M
+R17   25  14      380
+R15   25  15      1.62K
+QT16  1   20  15  Q_NPN 1
+QT15  2   24  21  Q_PNP 0.1
+*OFF
+R14   21  24      4K
+C1    27  24      20P
+R13   19  2       4K
+QT13  24  27  18  Q_NPN 0.1
+QT12  20  25  22  Q_NPN 1 
+*OFF
+QT11  20  28  2   Q_NPN 0.1
+*OFF
+QT10  20  11  1   Q_PNP 0.1
+R10   17  27      16.5K
+R9    5   4       1.9K
+R8    4   23      26
+R7    10  2       1.2K
+R6    29  2       1K
+QT9   11  11  1   Q_PNP 0.1
+QT8   27  16  29  Q_NPN 0.1
+QT4   15  6   17  Q_NPN 0.1
+DZ1   2   9       D_5V6
+R4    1   9       80K
+R3    28  2       830
+R2    13  28      4.97K
+R1    8   13      7K
+*
+.MODEL D_5V1 D( IS=10F N=1.16 BV=5.1 IBV=0.5M CJ0 = 1P TT = 10p )
+.MODEL D_5V6 D( IS=10F N=1.16 BV=5.6 IBV=5U CJ0 = 1P TT = 10p )
+.MODEL Q_NPN NPN( IS=10F NF=1.16 NR=1.16 BF=80 CJC=1P CJE=2P TF=10P TR=1N )
+.MODEL Q_PNP PNP( IS=10F NF=1.16 NR=1.16 BF=80 CJC=1P CJE=2P TF=10P TR=1N )
+.MODEL D_D D( IS=1F N=1.16 CJ0 = 1P TT = 10p )
+*
+.ENDS LM7805_sub
+
+.SUBCKT VoltageRegulators_LM7805  gnd _net0 _net2 _net1 
+X1 _net0 _net2 _net1 LM7805_sub
+.ENDS
+  
+D_1N4001_1 _net1 _net0 DMOD_D_1N4001_1 AREA=1.0
+.MODEL DMOD_D_1N4001_1 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
+D_1N4001_2 _net0 _net2 DMOD_D_1N4001_2 AREA=1.0
+.MODEL DMOD_D_1N4001_2 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
+D_1N4001_4 _net1 _net3 DMOD_D_1N4001_4 AREA=1.0
+.MODEL DMOD_D_1N4001_4 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
+D_1N4001_3 _net3 _net2 DMOD_D_1N4001_3 AREA=1.0
+.MODEL DMOD_D_1N4001_3 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
+V1 _net0 _net2 DC 0 SIN(0 1 1K 0 0 0) AC 1 ACPHASE 0
+XREG1 0  _net1 0 Vout VoltageRegulators_LM7805
+C1 0 _net1  1n
+C2 0 Vout  1n 
+
+.TRAN 0.01s 1.0s 0.0s 0.01s
+.PRINT TRAN V(Vout)
+
+.END

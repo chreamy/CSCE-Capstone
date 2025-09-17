@@ -1,0 +1,13 @@
+* Voltage Divider
+
+.TRAN 1ms 100ms 0ms .1ms
+.PRINT TRAN V(2)
+
+* Voltage Sources
+VIN 1 0 5
+* Resistors
+R1 1 2 2000
+
+R2 2 0 2000
+*
+.END
