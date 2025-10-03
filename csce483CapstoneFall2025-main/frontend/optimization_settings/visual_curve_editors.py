@@ -232,3 +232,164 @@ def open_heaviside_editor(owner, amp, t0, x1, on_change):
     fig.canvas.mpl_connect("button_release_event", on_release)
 
     on_change(amp, t0, x1)
+
+# ------------------------
+# STEP FUNCTION editor (many Heavisides)
+# ------------------------
+def open_step_editor(owner, steps, on_change):
+    """
+    steps: list of (amp, t0, x1) tuples
+    on_change: callback(steps_list) called on drag/release/apply/add/remove
+    """
+    import tkinter as tk
+    from tkinter import ttk
+    import numpy as np
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    from matplotlib.figure import Figure
+
+    # normalize & sort
+    steps = sorted([(float(a), float(t0), float(x1)) for (a,t0,x1) in steps], key=lambda s: s[1])
+    if not steps:
+        steps = [(1.0, 0.0, 1.0)]
+
+    win = tk.Toplevel(owner)
+    win.title("Step Function Editor")
+    win.geometry("900x560")
+
+    fig = Figure(figsize=(8.2, 4.2))
+    ax = fig.add_subplot(111)
+    ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    canvas = FigureCanvasTkAgg(fig, master=win)
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=6, pady=4)
+    ttk.Button(bar, text="Add Step", command=lambda: add_step()).pack(side=tk.LEFT, padx=4)
+    ttk.Button(bar, text="Remove Step", command=lambda: remove_step()).pack(side=tk.LEFT, padx=4)
+
+    # list view
+    list_frame = ttk.Frame(win); list_frame.pack(fill=tk.X, padx=6, pady=(0,6))
+    cols = ("idx","amp","t0","x1")
+    tv = ttk.Treeview(list_frame, columns=cols, show="headings", height=5)
+    for c,w in [("idx",40),("amp",120),("t0",120),("x1",120)]:
+        tv.heading(c, text=c); tv.column(c, width=w, anchor="center")
+    tv.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    ttk.Scrollbar(list_frame, orient="vertical", command=tv.yview).pack(side=tk.RIGHT, fill=tk.Y)
+
+    sel_idx = 0
+    dragging = None  # "amp" or "t0"
+    vlines, markers, plots = [], [], []
+
+    def stair_xy(step):
+        a,t0,x1 = step
+        xs = np.linspace(t0, x1, 200)
+        ys = np.where(xs >= t0, a, 0.0)
+        return xs, ys
+
+    def bounds(steps_):
+        import numpy as np
+        xs = []; ys = []
+        for s in steps_:
+            X,Y = stair_xy(s); xs.append(X); ys.append(Y)
+        xcat = np.concatenate(xs) if xs else np.array([0,1])
+        ycat = np.concatenate(ys) if ys else np.array([0,1])
+        xmin, xmax = float(np.min(xcat)), float(np.max(xcat))
+        ymin, ymax = float(np.min(ycat)), float(np.max(ycat))
+        if xmax <= xmin: xmax = xmin + 1.0
+        px = 0.05*(xmax - xmin)
+        py = 0.2*max(1.0, abs(ymax - ymin))
+        return xmin - px, xmax + px, ymin - py, ymax + py
+
+    def fill_table():
+        tv.delete(*tv.get_children())
+        for i,(a,t0,x1) in enumerate(steps):
+            tv.insert("", "end", values=(i, a, t0, x1))
+        kids = tv.get_children()
+        if kids:
+            tv.selection_set(kids[min(sel_idx, len(kids)-1)])
+
+    def redraw(rescale=False):
+        nonlocal vlines, markers, plots
+        for art in vlines + markers + plots:
+            try: art.remove()
+            except Exception: pass
+        vlines, markers, plots = [], [], []
+
+        for s in steps:
+            a,t0,x1 = s
+            X,Y = stair_xy(s)
+            (p,) = ax.plot(X, Y, lw=2)
+            v = ax.axvline(t0, ls="--", lw=1.2)
+            (mkr,) = ax.plot([t0 + 0.05*(x1 - t0)], [a], "o", ms=8)
+            plots.append(p); vlines.append(v); markers.append(mkr)
+
+        if rescale:
+            xmin, xmax, ymin, ymax = bounds(steps)
+            ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
+
+        canvas.draw_idle()
+        fill_table()
+        on_change(steps)
+
+    def on_select(_evt=None):
+        nonlocal sel_idx
+        sel = tv.selection()
+        if not sel: return
+        sel_idx = tv.index(sel[0])
+
+    tv.bind("<<TreeviewSelect>>", on_select)
+
+    def add_step():
+        nonlocal sel_idx
+        if steps:
+            a, t0, x1 = steps[min(sel_idx, len(steps)-1)]
+            new = (a, x1, x1 + max(1.0, (x1 - t0)))
+        else:
+            new = (1.0, 0.0, 1.0)
+        steps.append(new)
+        steps.sort(key=lambda s: s[1])
+        sel_idx = steps.index(new)
+        redraw(rescale=True)
+
+    def remove_step():
+        nonlocal sel_idx
+        if not steps: return
+        steps.pop(sel_idx)
+        sel_idx = max(0, sel_idx - 1)
+        redraw(rescale=True)
+
+    def hit_test(ev):
+        if ev.inaxes != ax or not steps: return None
+        a,t0,x1 = steps[sel_idx]
+        hx, hy = t0 + 0.05*(x1 - t0), a
+        if abs(ev.xdata - hx) < 0.03*(x1 - t0) and abs(ev.ydata - hy) < 0.1*max(1.0, abs(a)):
+            return "amp"
+        if abs(ev.xdata - t0) < 0.02*max(1.0, x1 - t0):
+            return "t0"
+        return None
+
+    def on_press(ev):
+        nonlocal dragging
+        dragging = hit_test(ev)
+
+    def on_motion(ev):
+        nonlocal steps
+        if dragging is None or ev.inaxes != ax: return
+        a,t0,x1 = steps[sel_idx]
+        if dragging == "amp":
+            a = float(ev.ydata)
+        elif dragging == "t0":
+            t0 = min(float(ev.xdata), x1 - 1e-6)
+        steps[sel_idx] = (a, t0, x1)
+        redraw(rescale=False)
+
+    def on_release(ev):
+        nonlocal dragging
+        dragging = None
+        redraw(rescale=True)
+
+    fig.canvas.mpl_connect("button_press_event", on_press)
+    fig.canvas.mpl_connect("motion_notify_event", on_motion)
+    fig.canvas.mpl_connect("button_release_event", on_release)
+
+    # initial
+    redraw(rescale=True)

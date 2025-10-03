@@ -1,6 +1,6 @@
 
 # Visual curve editors (Matplotlib embedded in Tkinter)
-from .visual_curve_editors import open_line_editor, open_heaviside_editor
+from .visual_curve_editors import open_line_editor, open_heaviside_editor, open_step_editor
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -14,6 +14,7 @@ class input_type(Enum):
     LINE = 1
     HEAVISIDE = 2
     UPLOAD = 3
+    STEP = 4
 
 class CurveFitSettings(tk.Frame):
     def __init__(self, parent: tk.Frame, parameters: List[str], nodes, controller: "AppController", inputs_completed_callback=None):
@@ -35,7 +36,7 @@ class CurveFitSettings(tk.Frame):
         ttk.Label(self.select_input_type_frame, text="Target Function Type: ").pack(side=tk.LEFT)
         answer = tk.StringVar()
         self.input_type_options = ttk.Combobox(self.select_input_type_frame, textvariable=answer)
-        self.input_type_options['values'] = ('Line','Heaviside','Upload')
+        self.input_type_options['values'] = ('Line','Heaviside','Upload', 'Step Function')
         self.input_type_options.pack(side=tk.LEFT)
         if self.input_type_options['values']:
             self.input_type_options.current(0)
@@ -44,6 +45,7 @@ class CurveFitSettings(tk.Frame):
         self.frames['Line'] = self.create_line_frame()
         self.frames['Heaviside'] = self.create_heaviside_frame()
         self.frames['Upload'] = self.create_upload_frame()
+        self.frames['Step Function'] = self.create_step_frame()
 
         for frame in self.frames.values():
             frame.pack_forget()
@@ -189,7 +191,72 @@ class CurveFitSettings(tk.Frame):
         curve_file_label = tk.Label(upload_frame, textvariable=self.curve_file_path_var)
         curve_file_label.pack()
         return upload_frame
+    
+    def create_step_frame(self):
+        frame = tk.Frame(self.select_input_type_frame)
+        frame.pack()
 
+        # buffer we pass to the editor (list of (amp, t0, x1))
+        self._step_buffer = [(1.0, 0.0, 1.0)]
+
+        info = tk.StringVar(value="Steps: 1 | Range: [0.0 .. 1.0]")
+        ttk.Label(frame, textvariable=info).pack(side=tk.LEFT, padx=6)
+
+        def _open_editor():
+            def _on_change(steps_list):
+                # update label live
+                if steps_list:
+                    xs0 = min(t0 for _,t0,_ in steps_list)
+                    xs1 = max(x1 for *_,x1 in steps_list)
+                    info.set(f"Steps: {len(steps_list)} | Range: [{xs0} .. {xs1}]")
+                else:
+                    info.set("Steps: 0")
+                self._step_buffer = list(steps_list)
+            open_step_editor(self, list(self._step_buffer), _on_change)
+
+        def _add_step_function():
+            if not self._step_buffer:
+                messagebox.showerror("Input Error", "Add at least one step in the editor first.")
+                return
+            # Add a STEP item to model/list and generate composite data
+            steps_copy = list(self._step_buffer)
+
+            # Optional: if you want to disallow overlaps ACROSS *different* STEP items,
+            # compute the union range and compare with existing items here.
+
+            # Update model and list
+            item = {"type": "STEP", "params": steps_copy}
+            self.func_model.append(item)
+
+            xs0 = min(t0 for _,t0,_ in steps_copy)
+            xs1 = max(x1 for *_,x1 in steps_copy)
+            desc = f"steps = {len(steps_copy)}"
+            rng  = f"[{xs0} to {xs1}]"
+            self.func_list.insert("", "end", values=("STEP", desc, rng))
+
+            # generate composite series
+            data_points = self._build_step_series(steps_copy)
+            self.generated_data = data_points
+            self.controller.update_app_data("generated_data", data_points)
+            if self.inputs_completed_callback:
+                self.inputs_completed_callback("function_button_pressed", True)
+
+        ttk.Button(frame, text="Open Step Editor", command=_open_editor).pack(side=tk.LEFT, padx=6)
+        ttk.Button(frame, text="Add Step Function", command=_add_step_function).pack(side=tk.LEFT, padx=10)
+
+        return frame
+    
+    def _build_step_series(self, steps):
+        import numpy as np
+        # If you prefer *sum of steps*, allow overlaps and sum amplitudes:
+        xs0 = min(t0 for _,t0,_ in steps)
+        xs1 = max(x1 for *_,x1 in steps)
+        X = np.linspace(xs0, xs1, 300)
+        Y = np.zeros_like(X)
+        for a, t0, x1 in steps:
+            Y = Y + np.where((X >= t0) & (X <= x1), a, 0.0)
+        return [[float(x), float(y)] for x, y in zip(X, Y)]
+    
     def show_frame(self):
         selected_frame = self.input_type_options.get()
         if selected_frame in self.frames:
@@ -318,7 +385,7 @@ class CurveFitSettings(tk.Frame):
                 curr_range = (xa, xb)
                 x0, x1 = xa, xb
             open_line_editor(self, slope, yint, x0, x1, _apply)
-        else:
+        elif item["type"] == "HEAVISIDE":
             amp, x0, x1 = item["params"]
             curr_range = (x0, x1)
             def _apply(a, t0, x1_new):
@@ -348,6 +415,27 @@ class CurveFitSettings(tk.Frame):
                 curr_range = (t0, x1_new)
                 x0, x1 = t0, x1_new
             open_heaviside_editor(self, amp, x0, x1, _apply)
+        else:
+            steps = item["params"]
+
+            def _apply(new_steps):
+                # commit
+                self.func_model[idx] = {"type": "STEP", "params": list(new_steps)}
+                # regenerate curve
+                data_points = self._build_step_series(new_steps)
+                self.generated_data = data_points
+                self.controller.update_app_data("generated_data", data_points)
+                if self.inputs_completed_callback:
+                    self.inputs_completed_callback("function_button_pressed", True)
+                # update UI row
+                xs0 = min(t0 for _,t0,_ in new_steps)
+                xs1 = max(x1 for *_,x1 in new_steps)
+                desc = f"steps = {len(new_steps)}"
+                rng  = f"[{xs0} to {xs1}]"
+                row_id = self.func_list.get_children()[idx]
+                self.func_list.item(row_id, values=("STEP", desc, rng))
+
+            open_step_editor(self, list(steps), on_change=_apply)
 
     def select_curve_file_and_process(self):
         file_path = filedialog.askopenfilename(
