@@ -2,10 +2,16 @@ import numpy as np
 import subprocess
 import io
 import sys
+import os
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 from backend.xyce_parsing_function import parse_xyce_prn_output
 from backend.netlist_parse import Netlist
+
+def log_to_file(message: str, log_file: str = "xyce.log"):
+    """Write log message to log file."""
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"{message}\n")
 
 """
 Two constraint types:
@@ -23,6 +29,18 @@ node_constraints = {
 }
 """
 def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list,queue, custom_xtol= 1e-12,custom_gtol= 1e-12,custom_ftol= 1e-12) -> None:
+    # Initialize log file with session header
+    log_to_file("="*80)
+    log_to_file("Starting new optimization session")
+    log_to_file(f"Target value: {target_value}")
+    log_to_file(f"Netlist file: {writable_netlist_path}")
+    log_to_file(f"Node constraints: {node_constraints}")
+    log_to_file(f"Optimization parameters:")
+    log_to_file(f"  xtol: {custom_xtol}")
+    log_to_file(f"  gtol: {custom_gtol}")
+    log_to_file(f"  ftol: {custom_ftol}")
+    log_to_file("="*80 + "\n")
+
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()  # Redirect output
 
@@ -76,10 +94,36 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                         component.modified = True
             
             new_netlist.class_to_file(local_netlist_file)
-            subprocess.run(["Xyce", "-delim", "COMMA", "-quiet", local_netlist_file], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            #TODO: Smart way to set timestep and ensure consistency. Rn just decided arbitrarily by first run
+            
+            # Log netlist state before Xyce run
+            log_to_file(f"Run #{xyceRuns} - Starting Xyce simulation")
+            log_to_file(f"Netlist file: {local_netlist_file}")
+            log_to_file("Component values:")
+            for comp in new_netlist.components:
+                log_to_file(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})")
+            
+            # Run Xyce with full output capture
+            process = subprocess.run(
+                ["Xyce", "-delim", "COMMA", local_netlist_file],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Log Xyce output
+            log_to_file("Xyce stdout:")
+            for line in process.stdout.split('\n'):
+                if line.strip():
+                    log_to_file(f"  {line}")
+            log_to_file("Xyce stderr:")
+            for line in process.stderr.split('\n'):
+                if line.strip():
+                    log_to_file(f"  {line}")
+            
+            # Log parsing attempt
+            log_to_file(f"Attempting to parse output file: {local_netlist_file}.prn")
             xyce_parse = parse_xyce_prn_output(local_netlist_file + ".prn")
+            log_to_file(f"Successfully parsed output file. Found {len(xyce_parse[1])} data points")
 
             # Assumes Xyce output is Index, Time, arb. # of VALUES
             row_index = xyce_parse[0].index(target_value.upper())
@@ -124,6 +168,13 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
 
         optimal_netlist.class_to_file(local_netlist_file)
 
+        # Log final optimization state
+        log_to_file("\nOptimization completed")
+        log_to_file("Final component values:")
+        for comp in optimal_netlist.components:
+            if comp.variable:
+                log_to_file(f"  {comp.name}: {comp.value} (modified={comp.modified})")
+
         sys.stdout.flush()
         captured = sys.stdout.getvalue()
         lines = captured.split("\n")
@@ -133,6 +184,15 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
         initialCost = float(values[5].rstrip(","))
         finalCost = float(values[8].rstrip(","))
         optimality = float(values[11].rstrip("."))
+
+        # Log optimization metrics
+        log_to_file("\nOptimization metrics:")
+        log_to_file(f"  Total Xyce runs: {xyceRuns}")
+        log_to_file(f"  Least squares iterations: {leastSquaresIterations}")
+        log_to_file(f"  Initial cost: {initialCost}")
+        log_to_file(f"  Final cost: {finalCost}")
+        log_to_file(f"  Optimality: {optimality}")
+        log_to_file("="*80 + "\n")
 
     finally:
         sys.stdout = old_stdout  # Restore stdout no matter what
