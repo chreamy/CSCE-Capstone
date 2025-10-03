@@ -81,8 +81,44 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             #TODO: Smart way to set timestep and ensure consistency. Rn just decided arbitrarily by first run
             xyce_parse = parse_xyce_prn_output(local_netlist_file + ".prn")
 
+            headers = [header.strip() for header in xyce_parse[0]]
+            header_lookup = {}
+            for idx, header in enumerate(headers):
+                key = header.upper()
+                if key and key not in header_lookup:
+                    header_lookup[key] = idx
+
+            def resolve_header_index(identifier: str, kind: str) -> int:
+                if not identifier:
+                    raise ValueError(f"{kind} name is empty; cannot resolve column in Xyce output.")
+                candidates = []
+                raw = identifier.strip()
+                if raw:
+                    candidates.extend([raw, raw.upper()])
+                    if raw.upper().startswith("V(") and raw.endswith(")"):
+                        inner = raw[2:-1].strip()
+                    else:
+                        inner = raw.strip()
+                    if inner:
+                        candidates.extend([
+                            inner,
+                            inner.upper(),
+                            f"V({inner})",
+                            f"V({inner.upper()})",
+                        ])
+                seen = set()
+                for candidate in candidates:
+                    normalized = candidate.strip().upper()
+                    if not normalized or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    if normalized in header_lookup:
+                        return header_lookup[normalized]
+                available = ", ".join(headers)
+                raise ValueError(f"{kind} '{identifier}' not found in Xyce output columns: {available}")
+
             # Assumes Xyce output is Index, Time, arb. # of VALUES
-            row_index = xyce_parse[0].index(target_value.upper())
+            row_index = resolve_header_index(target_value, "Target variable")
 
             X_ARRAY_FROM_XYCE = np.array([float(x[1]) for x in xyce_parse[1]])
             Y_ARRAY_FROM_XYCE = np.array([float(x[row_index]) for x in xyce_parse[1]])
@@ -99,10 +135,10 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
 
             for node_name, (node_lower, node_upper) in node_constraints.items():
-                node_index = xyce_parse[0].index(node_name.upper())
+                node_index = resolve_header_index(node_name, "Node variable")
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
                 if (node_lower is not None and np.any(node_values < node_lower)) or (node_upper is not None and np.any(node_values > node_upper)):
-                    return np.full_like(run_state["master_x_points"], 1e6)  # TODO: Right now its just an arbitraritly large penalty
+                    return np.full_like(run_state["master_x_points"], 1e6)  # TODO: Right now its just an arbitrarily large penalty
 
             # TODO: Proper residual? (subrtarct, rms, etc.)
             return ideal_interpolation(run_state["master_x_points"]) - xyce_interpolation(run_state["master_x_points"])
@@ -199,3 +235,4 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
 # NODE_CONSTRAINTS = {}
 
 # curvefit_optimize(TARGET_VALUE, TEST_ROWS, TEST_NETLIST, WRITABLE_NETLIST_PATH, NODE_CONSTRAINTS)
+
