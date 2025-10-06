@@ -1,4 +1,5 @@
 
+import os
 import shutil
 import numpy as np
 from backend.curvefit_optimization import curvefit_optimize
@@ -57,6 +58,7 @@ def add_node_constraints(constraints):
     return formattedNodeConstraints
 
 def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedParameters,optimizationTolerances,RLCBounds):
+    original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
     try:        
         TARGET_VALUE = curveData["y_parameter"]
         TEST_ROWS = testRows
@@ -105,7 +107,12 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
 
         endValue = max([sublist[0] for sublist in TEST_ROWS])
         initValue = min([sublist[0] for sublist in TEST_ROWS])
-        shutil.copyfile(NETLIST.file_path, WRITABLE_NETLIST_PATH)
+
+        source_netlist_path = ORIG_NETLIST_PATH
+        if not os.path.exists(source_netlist_path):
+            source_netlist_path = NETLIST.file_path
+        shutil.copyfile(source_netlist_path, WRITABLE_NETLIST_PATH)
+        NETLIST.file_path = ORIG_NETLIST_PATH
         NETLIST.class_to_file(WRITABLE_NETLIST_PATH)
         CONSTRAINED_NODES = []
         for constraint in curveData["constraints"]:
@@ -117,6 +124,7 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
         optim = curvefit_optimize(TARGET_VALUE, TEST_ROWS, NETLIST, WRITABLE_NETLIST_PATH, NODE_CONSTRAINTS, EQUALITY_PART_CONSTRAINTS,queue,optimizationTolerances[0],optimizationTolerances[1],optimizationTolerances[2])
 
         #Update AppData
+        NETLIST.file_path = ORIG_NETLIST_PATH
         queue.put(("UpdateNetlist",NETLIST))
         queue.put(("UpdateOptimizationResults",optim))
         
@@ -130,3 +138,5 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
         queue.put(("Done", f"Optimization Results:"))
     except Exception as e:
         queue.put(("Failed",f"{e}"))
+    finally:
+        netlistObject.file_path = original_netlist_path
