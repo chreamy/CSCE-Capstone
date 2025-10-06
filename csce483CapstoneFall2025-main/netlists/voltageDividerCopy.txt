@@ -1,16 +1,11 @@
 * Voltage Divider
-
 .PARAM VIN=5 RTOP=2k RBOT=2k
-
-.TRAN 1ms 100ms 0ms .1ms
-.PRINT TRAN V(2)
-
 * Voltage Sources
+.TRAN 0.001s 0.1s 0.0s 0.001s
+.PRINT TRAN V(2) 
 VIN 1 0 {VIN}
 * Resistors
-R1 1 2 {RTOP}
-
-R2 2 0 {RBOT}
+R1 1 2 1999.999999999999
+R2 2 0 3882.35293923659
 *
 .END
-
