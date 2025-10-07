@@ -1,3 +1,7 @@
+
+# Visual curve editors (Matplotlib embedded in Tkinter)
+from .visual_curve_editors import open_line_editor, open_heaviside_editor
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import List, Dict, Any
@@ -31,9 +35,7 @@ class CurveFitSettings(tk.Frame):
         ttk.Label(self.select_input_type_frame, text="Target Function Type: ").pack(side=tk.LEFT)
         answer = tk.StringVar()
         self.input_type_options = ttk.Combobox(self.select_input_type_frame, textvariable=answer)
-        self.input_type_options['values'] = ('Line',
-                                        'Heaviside',
-                                        'Upload')
+        self.input_type_options['values'] = ('Line','Heaviside','Upload')
         self.input_type_options.pack(side=tk.LEFT)
         if self.input_type_options['values']:
             self.input_type_options.current(0)
@@ -46,11 +48,25 @@ class CurveFitSettings(tk.Frame):
         for frame in self.frames.values():
             frame.pack_forget()
 
+        # --- Target functions list + actions ---
         self.see_inputted_functions = ttk.Frame(self)
-        self.see_inputted_functions.pack(pady=5, side=tk.TOP, expand=False)
+        self.see_inputted_functions.pack(pady=5, side=tk.TOP, expand=False, fill=tk.X)
 
+        self.func_list = ttk.Treeview(self.see_inputted_functions, columns=("type","desc","range"), show="headings", height=4)
+        self.func_list.heading("type", text="Type")
+        self.func_list.heading("desc", text="Description")
+        self.func_list.heading("range", text="x-range")
+        self.func_list.column("type", width=90, anchor="w")
+        self.func_list.column("desc", width=480, anchor="w")
+        self.func_list.column("range", width=160, anchor="center")
+        self.func_list.pack(side=tk.LEFT, padx=6, pady=4, fill=tk.X, expand=True)
 
+        btns = ttk.Frame(self.see_inputted_functions)
+        btns.pack(side=tk.LEFT, padx=8, pady=4)
+        ttk.Button(btns, text="Edit Selected", command=self.edit_selected_function).pack(fill=tk.X, pady=2)
+        ttk.Button(btns, text="Delete Selected", command=self.delete_selected_function).pack(fill=tk.X, pady=2)
 
+        self.func_model = []  # list of {"type": "...", "params": (...)}
 
         # --- X and Y Parameter Dropdowns and Expressions ---
         x_param_label = ttk.Label(self, text="X Parameter: TIME , ")
@@ -70,9 +86,7 @@ class CurveFitSettings(tk.Frame):
             state="readonly",
         )
         self.y_parameter_dropdown.pack(side=tk.LEFT, padx=5)
-        self.y_parameter_dropdown.bind(
-            "<<ComboboxSelected>>", self.on_y_parameter_selected
-        )
+        self.y_parameter_dropdown.bind("<<ComboboxSelected>>", self.on_y_parameter_selected)
     
     def custom_x_inputs_are_valid(self, x_start, x_end) -> bool:
         if (x_start < 0):
@@ -97,46 +111,71 @@ class CurveFitSettings(tk.Frame):
         for existing_tuple in self.time_tuples_list:
             if self.is_intersecting(existing_tuple, time_tuple):
                 messagebox.showerror("Input Error", "The time range you entered overlaps with a previously defined range. Please enter a non-overlapping time range.")
-                return True  # Return True if an intersection is found
-        return False  # Return False if no intersections are found
+                return True # Return True if an intersection is found
+        return False # Return False if no intersections are found
         
     def create_line_frame(self):
         line_frame = tk.Frame(self.select_input_type_frame)
         line_frame.pack()
         tk.Label(line_frame, text="Slope = ").pack(side=tk.LEFT) 
-        line_slope = tk.Entry(line_frame, width=5)
-        line_slope.pack(side=tk.LEFT)# have to separate the pack() into a new line bc it makes the type NONE
+        line_slope = tk.Entry(line_frame, width=5); line_slope.pack(side=tk.LEFT)
         tk.Label(line_frame, text=", Y-intercept = ").pack(side=tk.LEFT) 
-        line_intercept = tk.Entry(line_frame, width=5)
-        line_intercept.pack(side=tk.LEFT)
+        line_intercept = tk.Entry(line_frame, width=5); line_intercept.pack(side=tk.LEFT)
         tk.Label(line_frame, text=", From x = ").pack(side=tk.LEFT)
-        line_start_x = tk.Entry(line_frame, width=5)
-        line_start_x.pack(side=tk.LEFT)
+        line_start_x = tk.Entry(line_frame, width=5); line_start_x.pack(side=tk.LEFT)
         tk.Label(line_frame, text="to x = ").pack(side=tk.LEFT)
-        line_end_x = tk.Entry(line_frame, width=5)
-        line_end_x.pack(side=tk.LEFT)        
-        self.line_button = ttk.Button(line_frame, text="Add Line", command=lambda: self.add_function(input_type.LINE, line_slope, line_intercept, line_start_x, line_end_x))
+        line_end_x = tk.Entry(line_frame, width=5); line_end_x.pack(side=tk.LEFT)        
+        self.line_button = ttk.Button(line_frame, text="Add Line",
+            command=lambda: self.add_function(input_type.LINE, line_slope, line_intercept, line_start_x, line_end_x))
         self.line_button.pack(side=tk.LEFT, padx=10)
-        self.custom_functions = []
 
+        ttk.Button(line_frame, text="Open Visual Editor",
+            command=lambda: open_line_editor(
+                self,
+                float(line_slope.get() or 1.0),
+                float(line_intercept.get() or 0.0),
+                float(line_start_x.get() or 0.0),
+                float(line_end_x.get() or 1.0),
+                on_change=lambda m,b,x0,x1: (
+                    line_slope.delete(0, tk.END), line_slope.insert(0, str(m)),
+                    line_intercept.delete(0, tk.END), line_intercept.insert(0, str(b)),
+                    line_start_x.delete(0, tk.END), line_start_x.insert(0, str(x0)),
+                    line_end_x.delete(0, tk.END),   line_end_x.insert(0,   str(x1))
+                )
+            )
+        ).pack(side=tk.LEFT, padx=6)
+
+        self.custom_functions = []
         return line_frame
 
     def create_heaviside_frame(self):
         heaviside_frame = tk.Frame(self.select_input_type_frame)
         heaviside_frame.pack()
         tk.Label(heaviside_frame, text="Amplitude = ").pack(side=tk.LEFT) 
-        heaviside_amplitude = tk.Entry(heaviside_frame, width=5)
-        heaviside_amplitude.pack(side=tk.LEFT)# have to separate the pack() into a new line bc it makes the type NONE
+        heaviside_amplitude = tk.Entry(heaviside_frame, width=5); heaviside_amplitude.pack(side=tk.LEFT)
         tk.Label(heaviside_frame, text=", From x = ").pack(side=tk.LEFT)
-        heaviside_start_x = tk.Entry(heaviside_frame, width=5)
-        heaviside_start_x.pack(side=tk.LEFT)
+        heaviside_start_x = tk.Entry(heaviside_frame, width=5); heaviside_start_x.pack(side=tk.LEFT)
         tk.Label(heaviside_frame, text="to x = ").pack(side=tk.LEFT)
-        heaviside_end_x = tk.Entry(heaviside_frame, width=5)
-        heaviside_end_x.pack(side=tk.LEFT)
-        self.heaviside_button = ttk.Button(heaviside_frame, text="Add Heaviside", command=lambda:
-                   self.add_function(input_type.HEAVISIDE, heaviside_amplitude, heaviside_start_x, heaviside_end_x,""))
+        heaviside_end_x = tk.Entry(heaviside_frame, width=5); heaviside_end_x.pack(side=tk.LEFT)
+
+        self.heaviside_button = ttk.Button(heaviside_frame, text="Add Heaviside",
+            command=lambda: self.add_function(input_type.HEAVISIDE, heaviside_amplitude, heaviside_start_x, heaviside_end_x,""))
         self.heaviside_button.pack(side=tk.LEFT, padx=10)
-        
+
+        ttk.Button(heaviside_frame, text="Open Visual Editor",
+            command=lambda: open_heaviside_editor(
+                self,
+                float(heaviside_amplitude.get() or 1.0),
+                float(heaviside_start_x.get() or 0.0),
+                float(heaviside_end_x.get() or 1.0),
+                on_change=lambda a,t0,x1: (
+                    heaviside_amplitude.delete(0, tk.END), heaviside_amplitude.insert(0, str(a)),
+                    heaviside_start_x.delete(0, tk.END),   heaviside_start_x.insert(0, str(t0)),
+                    heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0,   str(x1))
+                )
+            )
+        ).pack(side=tk.LEFT, padx=6)
+
         return heaviside_frame
 
     def create_upload_frame(self):
@@ -149,7 +188,6 @@ class CurveFitSettings(tk.Frame):
         self.curve_file_path_var = tk.StringVar(value="")
         curve_file_label = tk.Label(upload_frame, textvariable=self.curve_file_path_var)
         curve_file_label.pack()
-
         return upload_frame
 
     def show_frame(self):
@@ -164,83 +202,157 @@ class CurveFitSettings(tk.Frame):
     def clear_existing_data(self):
         self.custom_functions = []
         self.generated_data = None
-        
         # Clear the see_inputted_functions frame
         for widget in self.see_inputted_functions.winfo_children():
             widget.destroy()
-        
         # Reset the buttons
         self.line_button.config(state=tk.NORMAL)
         self.heaviside_button.config(state=tk.NORMAL)
 
     def add_function(self, in_type, arg1, arg2, arg3, arg4):
         if in_type == input_type.LINE:
-            slope = float(arg1.get())
-            y_int = float(arg2.get())
-            x_start = float(arg3.get())
-            x_end = float(arg4.get())
-            
-            if (self.custom_x_inputs_are_valid(x_start, x_end) == False):
-                return
-            
-            if (self.check_if_in_previous_x_ranges((x_start, x_end)) == True):
-                return
-            
-            self.heaviside_button.config(state=tk.DISABLED) #disable the other button
-            
+            slope = float(arg1.get()); y_int = float(arg2.get())
+            x_start = float(arg3.get()); x_end = float(arg4.get())
+            if not self.custom_x_inputs_are_valid(x_start, x_end): return
+            if self.check_if_in_previous_x_ranges((x_start, x_end)): return
+
+            self.heaviside_button.config(state=tk.DISABLED)
             self.time_tuples_list.append((x_start, x_end))
-            
             self.custom_functions.append((slope, y_int, x_start, x_end))
-            string_func = f"LINE: y = ({slope})*x + {y_int}; from x = [{x_start} to {x_end}]"
+            string_func = f"y = ({slope})*x + {y_int}"
+            rng = f"[{x_start} to {x_end}]"
 
             x_values = np.linspace(x_start, x_end, 100)
             y_values = slope * x_values + y_int
             self.generated_data = [[float(x), float(y)] for x, y in zip(x_values, y_values)]
             self.controller.update_app_data("generated_data", self.generated_data)
-
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("function_button_pressed", True)
 
+            item = {"type":"LINE", "params":(slope, y_int, x_start, x_end)}
+            self.func_model.append(item)
+            self.func_list.insert("", "end", values=("LINE", string_func, rng))
+
         elif in_type == input_type.HEAVISIDE:
-            amplitude = float(arg1.get())
-            x_start = float(arg2.get())
-            x_end = float(arg3.get())
+            amplitude = float(arg1.get()); x_start = float(arg2.get()); x_end = float(arg3.get())
+            if not self.custom_x_inputs_are_valid(x_start, x_end): return
+            if self.check_if_in_previous_x_ranges((x_start, x_end)): return
 
-            if (self.custom_x_inputs_are_valid(x_start, x_end) == False):
-                return
-            
-            if (self.check_if_in_previous_x_ranges((x_start, x_end)) == True):
-                return
-            
             self.time_tuples_list.append((x_start, x_end))
-
-            self.line_button.config(state=tk.DISABLED) #disable the other button          
-
+            self.line_button.config(state=tk.DISABLED)
             self.custom_functions.append((amplitude, x_start, x_end))
-            string_func = f"HEAVISIDE: amplitude = {amplitude}; from x = [{x_start} to {x_end}]"
-            
+
             x_values = np.linspace(x_start, x_end, 100)
             y_values = [amplitude if x >= x_start else 0 for x in x_values]
             self.generated_data = [[float(x), float(y)] for x, y in zip(x_values, y_values)]
             self.controller.update_app_data("generated_data", self.generated_data)
-
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("function_button_pressed", True)
 
+            item = {"type":"HEAVISIDE", "params":(amplitude, x_start, x_end)}
+            self.func_model.append(item)
+            self.func_list.insert("", "end", values=("HEAVISIDE", f"amplitude = {amplitude}", f"[{x_start} to {x_end}]"))
+
         else:
-            return # this function should never be called if the type was anything other than LINE or HEAVISIDE (i.e. it could not be called if type was UPLOAD)
-        self.func_label = ttk.Label(self.see_inputted_functions, text=string_func)
-        self.func_label.pack(side=tk.TOP, pady=5)
-       
+            return
+
+    def _selected_index(self):
+        sel = self.func_list.selection()
+        if not sel:
+            return None
+        return self.func_list.index(sel[0])
+
+    def delete_selected_function(self):
+        idx = self._selected_index()
+        if idx is None:
+            return
+        item = self.func_model.pop(idx)
+        if item["type"] == "LINE":
+            _, _, x0, x1 = item["params"]
+        else:
+            _, x0, x1 = item["params"]
+        try:
+            self.time_tuples_list.remove((x0, x1))
+        except ValueError:
+            pass
+        self.func_list.delete(self.func_list.get_children()[idx])
+        if not self.func_model:
+            self.line_button.config(state=tk.NORMAL)
+            self.heaviside_button.config(state=tk.NORMAL)
+
+    def edit_selected_function(self):
+        idx = self._selected_index()
+        if idx is None:
+            return
+        item = self.func_model[idx]
+        if item["type"] == "LINE":
+            slope, yint, x0, x1 = item["params"]
+            curr_range = (x0, x1)
+            def _apply(m, b, xa, xb):
+                nonlocal curr_range, x0, x1
+                # temporarily remove this item’s current range so we don’t collide with ourselves
+                try:
+                    self.time_tuples_list.remove(curr_range)
+                except ValueError:
+                    pass
+                if self.check_if_in_previous_x_ranges((xa, xb)):
+                    # restore old range and abort
+                    self.time_tuples_list.append(curr_range)
+                    return
+                # commit new model data
+                self.func_model[idx] = {"type": "LINE", "params": (m, b, xa, xb)}
+                # regenerate curve
+                x_values = np.linspace(xa, xb, 100)
+                y_values = m * x_values + b
+                self.generated_data = [[float(x), float(y)] for x, y in zip(x_values, y_values)]
+                self.controller.update_app_data("generated_data", self.generated_data)
+                if self.inputs_completed_callback:
+                    self.inputs_completed_callback("function_button_pressed", True)
+                # update UI
+                desc = f"y = ({m})*x + {b}"
+                rng = f"[{xa} to {xb}]"
+                row_id = self.func_list.get_children()[idx]
+                self.func_list.item(row_id, values=("LINE", desc, rng))
+                # commit new time range and update the tracker
+                self.time_tuples_list.append((xa, xb))
+                curr_range = (xa, xb)
+                x0, x1 = xa, xb
+            open_line_editor(self, slope, yint, x0, x1, _apply)
+        else:
+            amp, x0, x1 = item["params"]
+            curr_range = (x0, x1)
+            def _apply(a, t0, x1_new):
+                nonlocal curr_range, x0, x1
+                try:
+                    self.time_tuples_list.remove(curr_range)
+                except ValueError:
+                    pass
+
+                if self.check_if_in_previous_x_ranges((t0, x1_new)):
+                    self.time_tuples_list.append(curr_range)
+                    return
+
+                self.func_model[idx] = {"type": "HEAVISIDE", "params": (a, t0, x1_new)}
+                xs = np.linspace(t0, x1_new, 100)
+                ys = [a if x >= t0 else 0 for x in xs]
+                self.generated_data = [[float(x), float(y)] for x, y in zip(xs, ys)]
+                self.controller.update_app_data("generated_data", self.generated_data)
+                if self.inputs_completed_callback:
+                    self.inputs_completed_callback("function_button_pressed", True)
+
+                desc = f"amplitude = {a}; from x = [{t0} to {x1_new}]"
+                row_id = self.func_list.get_children()[idx]
+                self.func_list.item(row_id, values=("HEAVISIDE", desc, f"[{t0} to {x1_new}]"))
+
+                self.time_tuples_list.append((t0, x1_new))
+                curr_range = (t0, x1_new)
+                x0, x1 = t0, x1_new
+            open_heaviside_editor(self, amp, x0, x1, _apply)
+
     def select_curve_file_and_process(self):
         file_path = filedialog.askopenfilename(
             title="Select a Curve File",
-            filetypes=[
-                ("CSV Files", "*.csv"),
-                ("Text Files", "*.txt"),
-                ("DAT Files", "*.dat"),
-                ("All Files", "*.*"),
-            ],
+            filetypes=[("CSV Files","*.csv"),("Text Files","*.txt"),("DAT Files","*.dat"),("All Files","*.*")],
         )
         if file_path:
             self.clear_existing_data()
@@ -253,32 +365,27 @@ class CurveFitSettings(tk.Frame):
             with open(file_path, 'r') as file:
                 csv_reader = csv.reader(file)
                 for row in csv_reader:
-                    # this is assuming CSV is formatted as x,y
                     try:
-                        x, y = map(float, row)  # Convert x and y to float
+                        x, y = map(float, row)
                         data_points.append([x, y])
                     except ValueError:
                         print(f"Skipping row: {row} - Invalid data format")
                         continue 
             self.controller.update_app_data("generated_data", data_points)
-
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("function_button_pressed", True)
-
         except FileNotFoundError:
             print("File not found.")
         except Exception as e:
             print(f"Error processing CSV file: {e}")
 
     def on_y_parameter_selected(self, event=None):
-        if self.y_parameter_dropdown.get():  # If something is selected
+        if self.y_parameter_dropdown.get():
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("y_param_dropdown_selected", True)
 
     def get_settings(self) -> Dict[str, Any]:
-        settings = {
-            "curve_file": self.curve_file_path_var.get(),
-        }
+        settings = {"curve_file": self.curve_file_path_var.get()}
         settings["x_parameter"] = self.x_parameter_var.get()
         settings["y_parameter"] = self.y_parameter_var.get()
         return settings
