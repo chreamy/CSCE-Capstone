@@ -123,8 +123,27 @@ class ParameterSelectionWindow(tk.Frame):
         """Loads the netlist and extracts parameters."""
         try:
             self.netlist = Netlist(netlist_path)
-            self.controller.update_app_data("netlist_object",self.netlist)
-            self.available_parameters = [component.name for component in self.netlist.components if isinstance(component, Component)]
+            self.controller.update_app_data("netlist_object", self.netlist)
+            resolved_includes = self.netlist.resolve_include_paths()
+            self.controller.update_app_data("netlist_includes", resolved_includes)
+            missing_includes = [entry for entry in resolved_includes if not entry.get("found")]
+            if missing_includes:
+                missing_list = "\n".join(
+                    f"- {entry.get('path') or entry.get('raw', '')}"
+                    for entry in missing_includes
+                )
+                messagebox.showwarning(
+                    "Missing Libraries",
+                    "The following .include/.lib references could not be resolved:\n"
+                    + missing_list
+                    + "\n\nMake sure these files are accessible to Xyce before running optimization."
+                )
+            self.available_parameters = [
+                component.name
+                for component in self.netlist.components
+                if isinstance(component, Component)
+                and getattr(component, "scope", "top") == "top"
+            ]
             self.nodes = self.netlist.nodes
             self.update_available_listbox()
 

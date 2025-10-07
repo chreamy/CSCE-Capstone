@@ -52,6 +52,7 @@ R4    1   9       80K
 R3    28  2       830
 R2    13  28      4.97K
 R1    8   13      7K
+.ENDS LM7805_sub
 *
 .MODEL D_5V1 D( IS=10F N=1.16 BV=5.1 IBV=0.5M CJ0 = 1P TT = 10p )
 .MODEL D_5V6 D( IS=10F N=1.16 BV=5.6 IBV=5U CJ0 = 1P TT = 10p )
@@ -59,12 +60,13 @@ R1    8   13      7K
 .MODEL Q_PNP PNP( IS=10F NF=1.16 NR=1.16 BF=80 CJC=1P CJE=2P TF=10P TR=1N )
 .MODEL D_D D( IS=1F N=1.16 CJ0 = 1P TT = 10p )
 *
-.ENDS LM7805_sub
 
-.SUBCKT VoltageRegulators_LM7805  gnd _net0 _net2 _net1 
+.SUBCKT VoltageRegulators_LM7805  gnd _net0 _net2 _net1
 X1 _net0 _net2 _net1 LM7805_sub
 .ENDS
-  
+
+.PARAM VIN_OFFSET=0 VIN_AMPL=1 SRC_FREQ=1k COUT=1n FILTER_CAP=2.2u
+
 D_1N4001_1 _net1 _net0 DMOD_D_1N4001_1 AREA=1.0
 .MODEL DMOD_D_1N4001_1 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
 D_1N4001_2 _net0 _net2 DMOD_D_1N4001_2 AREA=1.0
@@ -73,12 +75,19 @@ D_1N4001_4 _net1 _net3 DMOD_D_1N4001_4 AREA=1.0
 .MODEL DMOD_D_1N4001_4 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
 D_1N4001_3 _net3 _net2 DMOD_D_1N4001_3 AREA=1.0
 .MODEL DMOD_D_1N4001_3 D (Is=76.9P N=1.45 Cj0=39.8P M=0.333 Vj=0.7 Fc=0.5 Rs=42M Tt=4.32U Ikf=26.85 Kf=0 Af=1 Bv=50 Ibv=0 Xti=3.0 Eg=1.11 Tcv=0.0 Trs=0.0 Ttt1=0.0 Ttt2=0.0 Tm1=0.0 Tm2=0.0 Tnom=26.85 )
-V1 _net0 _net2 DC 0 SIN(0 1 1K 0 0 0) AC 1 ACPHASE 0
+V1 _net0 _net2 DC {VIN_OFFSET} SIN(0 {VIN_AMPL} {SRC_FREQ} 0 0 0) AC 1 ACPHASE 0
 XREG1 0  _net1 0 Vout VoltageRegulators_LM7805
-C1 0 _net1  1n
-C2 0 Vout  1n 
+C1 0 _net1  {COUT}
+C2 0 Vout  {FILTER_CAP} 
 
 .TRAN 0.01s 1.0s 0.0s 0.01s
 .PRINT TRAN V(Vout)
 
 .END
+
+
+
+
+
+
+
