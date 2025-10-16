@@ -3,15 +3,67 @@ import subprocess
 import io
 import sys
 import os
+from datetime import datetime
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 from backend.xyce_parsing_function import parse_xyce_prn_output
 from backend.netlist_parse import Netlist
 
-def log_to_file(message: str, log_file: str = "xyce.log"):
+def log_to_file(message: str, log_file: str = None):
     """Write log message to log file."""
+    if log_file is None:
+        log_file = get_session_log_file()
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"{message}\n")
+
+def log_and_append(message: str, run_info: list, queue, log_file: str = None):
+    """Log message to file, append to run_info, and send to frontend in real-time."""
+    run_info.append(message)
+    queue.put(("Log", message))
+
+def get_session_log_file():
+    """Get the next available session log file path."""
+    import os
+    
+    # Create runs directory if it doesn't exist
+    runs_dir = "runs"
+    if not os.path.exists(runs_dir):
+        os.makedirs(runs_dir)
+    
+    # Find the next available session number
+    session_num = 1
+    while True:
+        session_dir = os.path.join(runs_dir, str(session_num))
+        log_file = os.path.join(session_dir, "session.log")
+        if not os.path.exists(log_file):
+            # Create the session directory
+            os.makedirs(session_dir, exist_ok=True)
+            break
+        session_num += 1
+    
+    return log_file
+
+def get_current_session_number():
+    """Get the current session number (same logic as get_session_log_file but returns just the number)."""
+    import os
+    
+    # Create runs directory if it doesn't exist
+    runs_dir = "runs"
+    if not os.path.exists(runs_dir):
+        os.makedirs(runs_dir)
+    
+    # Find the next available session number
+    session_num = 1
+    while True:
+        session_dir = os.path.join(runs_dir, str(session_num))
+        log_file = os.path.join(session_dir, "session.log")
+        if not os.path.exists(log_file):
+            # Create the session directory
+            os.makedirs(session_dir, exist_ok=True)
+            break
+        session_num += 1
+    
+    return session_num
 
 """
 Two constraint types:
@@ -29,23 +81,51 @@ node_constraints = {
 }
 """
 def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list,queue, custom_xtol= 1e-12,custom_gtol= 1e-12,custom_ftol= 1e-12) -> None:
+    # Get the session log file path
+    session_log_file = get_session_log_file()
+    
     # Initialize log file with session header
-    log_to_file("="*80)
-    log_to_file("Starting new optimization session")
-    log_to_file(f"Target value: {target_value}")
-    log_to_file(f"Netlist file: {writable_netlist_path}")
-    log_to_file(f"Node constraints: {node_constraints}")
-    log_to_file(f"Optimization parameters:")
-    log_to_file(f"  xtol: {custom_xtol}")
-    log_to_file(f"  gtol: {custom_gtol}")
-    log_to_file(f"  ftol: {custom_ftol}")
-    log_to_file("="*80 + "\n")
+    session_start_time = datetime.now()
+    log_to_file("="*80, session_log_file)
+    log_to_file("Starting new optimization session", session_log_file)
+    log_to_file(f"Session started at: {session_start_time.strftime('%Y-%m-%d %H:%M:%S')}", session_log_file)
+    log_to_file(f"Target value: {target_value}", session_log_file)
+    log_to_file(f"Netlist file: {writable_netlist_path}", session_log_file)
+    log_to_file(f"Node constraints: {node_constraints}", session_log_file)
+    log_to_file(f"Optimization parameters:", session_log_file)
+    log_to_file(f"  xtol: {custom_xtol}", session_log_file)
+    log_to_file(f"  gtol: {custom_gtol}", session_log_file)
+    log_to_file(f"  ftol: {custom_ftol}", session_log_file)
+    log_to_file("="*80 + "\n", session_log_file)
+    
+    # Send initial info to UI (these don't need to be in run_info since they're session-level)
+    queue.put(("Log", "="*80))
+    queue.put(("Log", "Starting new optimization session"))
+    queue.put(("Log", f"Session started at: {session_start_time.strftime('%Y-%m-%d %H:%M:%S')}"))
+    queue.put(("Log", f"Target value: {target_value}"))
+    queue.put(("Log", f"Netlist file: {writable_netlist_path}"))
+    queue.put(("Log", f"Node constraints: {node_constraints}"))
+    queue.put(("Log", f"Optimization parameters:"))
+    queue.put(("Log", f"  xtol: {custom_xtol}"))
+    queue.put(("Log", f"  gtol: {custom_gtol}"))
+    queue.put(("Log", f"  ftol: {custom_ftol}"))
+    queue.put(("Log", "="*80))
 
+    # Store all run results for final logging
+    all_run_results = []
+    
     old_stdout = sys.stdout
     sys.stdout = io.StringIO()  # Redirect output
-
+    global xyceRuns
+    # Initialize variables that need to be accessible in finally block
+    xyceRuns = 0
+    leastSquaresIterations = 0
+    initialCost = 0
+    finalCost = 0
+    optimality = 0
+    
     try:
-        global xyceRuns
+        
         xyceRuns = 0
         # Assumes input_curve[0] is X, input_curve[1] is Y/target_value
         x_ideal = np.array([x[0] for x in target_curve_rows])
@@ -95,12 +175,15 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             
             new_netlist.class_to_file(local_netlist_file)
             
-            # Log netlist state before Xyce run
-            log_to_file(f"Run #{xyceRuns} - Starting Xyce simulation")
-            log_to_file(f"Netlist file: {local_netlist_file}")
-            log_to_file("Component values:")
+            # Store run information for later logging
+            run_info = []
+            
+            # Use combined function for all run logging
+            log_and_append(f"Run #{xyceRuns} - Starting Xyce simulation", run_info, queue, session_log_file)
+            log_and_append(f"Netlist file: {local_netlist_file}", run_info, queue, session_log_file)
+            log_and_append("Component values:", run_info, queue, session_log_file)
             for comp in new_netlist.components:
-                log_to_file(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})")
+                log_and_append(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})", run_info, queue, session_log_file)
             
             # Run Xyce with full output capture
             process = subprocess.run(
@@ -110,20 +193,62 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                 text=True
             )
             
-            # Log Xyce output
-            log_to_file("Xyce stdout:")
+            # Store Xyce output (filter out time-related messages and only log specific percent complete milestones)
+            log_and_append("Xyce stdout:", run_info, queue, session_log_file)
             for line in process.stdout.split('\n'):
                 if line.strip():
-                    log_to_file(f"  {line}")
-            log_to_file("Xyce stderr:")
+                    # Filter out time-related messages
+                    if "Current system time:" in line or "Estimated time to completion:" in line:
+                        queue.put(("Log", f"  {line}"))
+                        continue
+                    # For percent complete messages, only log at 20%, 40%, 60%, 80%, 100%
+                    if "Percent complete:" in line:
+                        queue.put(("Log", f"  {line}"))
+                        try:
+                            # Extract the percentage value
+                            percent_str = line.split("Percent complete:")[1].strip().rstrip(" %")
+                            percent = float(percent_str)
+                            # Only log if it's a milestone percentage
+                            if percent >= 20.0 and percent % 20.0 == 0:
+                                log_and_append(f"  {line}", run_info, queue, session_log_file)
+                        except (ValueError, IndexError):
+                            # If we can't parse the percentage, skip this line
+                            continue
+                    else:
+                        # Log all other non-time-related messages
+                        log_and_append(f"  {line}", run_info, queue, session_log_file)
+            
+            log_and_append("Xyce stderr:", run_info, queue, session_log_file)
             for line in process.stderr.split('\n'):
                 if line.strip():
-                    log_to_file(f"  {line}")
+                    # Filter out time-related messages
+                    if "Current system time:" in line or "Estimated time to completion:" in line:
+                        queue.put(("Log", f"  {line}"))
+                        continue
+                    # For percent complete messages, only log at 20%, 40%, 60%, 80%, 100%
+                    if "Percent complete:" in line:
+                        queue.put(("Log", f"  {line}"))
+                        try:
+                            # Extract the percentage value
+                            percent_str = line.split("Percent complete:")[1].strip().rstrip(" %")
+                            percent = float(percent_str)
+                            # Only log if it's a milestone percentage
+                            if percent >= 20.0 and percent % 20.0 == 0:
+                                log_and_append(f"  {line}", run_info, queue, session_log_file)
+                        except (ValueError, IndexError):
+                            # If we can't parse the percentage, skip this line
+                            continue
+                    else:
+                        # Log all other non-time-related messages
+                        log_and_append(f"  {line}", run_info, queue, session_log_file)
             
-            # Log parsing attempt
-            log_to_file(f"Attempting to parse output file: {local_netlist_file}.prn")
+            # Store parsing attempt
+            log_and_append(f"Attempting to parse output file: {local_netlist_file}.prn", run_info, queue, session_log_file)
             xyce_parse = parse_xyce_prn_output(local_netlist_file + ".prn")
-            log_to_file(f"Successfully parsed output file. Found {len(xyce_parse[1])} data points")
+            log_and_append(f"Successfully parsed output file. Found {len(xyce_parse[1])} data points", run_info, queue, session_log_file)
+            
+            # Store this run's results
+            all_run_results.append(run_info)
 
             # Assumes Xyce output is Index, Time, arb. # of VALUES
             row_index = xyce_parse[0].index(target_value.upper())
@@ -136,8 +261,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                 run_state["master_x_points"] = X_ARRAY_FROM_XYCE
 
 
-            if (xyceRuns % 5 == 0):
-                queue.put(("Update",f"total runs completed: {xyceRuns}"))
+            # Send run count update for every run
+            queue.put(("Update",f"total runs completed: {xyceRuns}"))
             queue.put(("UpdateYData",(X_ARRAY_FROM_XYCE,Y_ARRAY_FROM_XYCE))) 
 
             xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
@@ -151,6 +276,11 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             # TODO: Proper residual? (subrtarct, rms, etc.)
             return ideal_interpolation(run_state["master_x_points"]) - xyce_interpolation(run_state["master_x_points"])
 
+        # Log optimization start (session-level, not run-specific)
+        queue.put(("Log", f"Starting optimization with {len(changing_components)} variable components"))
+        queue.put(("Log", f"Component bounds: {len(lower_bounds)} lower, {len(upper_bounds)} upper"))
+        queue.put(("Log", "Beginning least squares optimization..."))
+        
         result = least_squares(residuals, changing_components_values, method='trf', bounds=(lower_bounds, upper_bounds), args=(changing_components,),
                                xtol=custom_xtol, gtol=custom_gtol, ftol = custom_ftol, jac='3-point', verbose=1)
 
@@ -168,33 +298,83 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
 
         optimal_netlist.class_to_file(local_netlist_file)
 
-        # Log final optimization state
-        log_to_file("\nOptimization completed")
-        log_to_file("Final component values:")
+        # Log final optimization state (session-level, not run-specific)
+        log_to_file("\nOptimization completed", session_log_file)
+        log_to_file("Final component values:", session_log_file)
+        queue.put(("Log", "Optimization completed"))
+        queue.put(("Log", "Final component values:"))
         for comp in optimal_netlist.components:
             if comp.variable:
-                log_to_file(f"  {comp.name}: {comp.value} (modified={comp.modified})")
+                log_to_file(f"  {comp.name}: {comp.value} (modified={comp.modified})", session_log_file)
+                queue.put(("Log", f"  {comp.name}: {comp.value} (modified={comp.modified})"))
 
+        # Parse optimization results
         sys.stdout.flush()
         captured = sys.stdout.getvalue()
         lines = captured.split("\n")
         line = next((item for item in lines if item.startswith("Function evaluations")), None)
-        values = line.split()
-        leastSquaresIterations = int(values[2].rstrip(","))
-        initialCost = float(values[5].rstrip(","))
-        finalCost = float(values[8].rstrip(","))
-        optimality = float(values[11].rstrip("."))
+        if line:
+            values = line.split()
+            leastSquaresIterations = int(values[2].rstrip(","))
+            initialCost = float(values[5].rstrip(","))
+            finalCost = float(values[8].rstrip(","))
+            optimality = float(values[11].rstrip("."))
+            
+            # Send optimization metrics to UI (session-level, not run-specific)
+            queue.put(("Log", "Optimization metrics:"))
+            queue.put(("Log", f"  Total Xyce runs: {xyceRuns}"))
+            queue.put(("Log", f"  Least squares iterations: {leastSquaresIterations}"))
+            queue.put(("Log", f"  Initial cost: {initialCost}"))
+            queue.put(("Log", f"  Final cost: {finalCost}"))
+            queue.put(("Log", f"  Optimality: {optimality}"))
 
-        # Log optimization metrics
-        log_to_file("\nOptimization metrics:")
-        log_to_file(f"  Total Xyce runs: {xyceRuns}")
-        log_to_file(f"  Least squares iterations: {leastSquaresIterations}")
-        log_to_file(f"  Initial cost: {initialCost}")
-        log_to_file(f"  Final cost: {finalCost}")
-        log_to_file(f"  Optimality: {optimality}")
-        log_to_file("="*80 + "\n")
+    except Exception as e:
+        # Log the error
+        log_to_file(f"\nOptimization failed with error: {e}", session_log_file)
+        log_to_file("="*80, session_log_file)
+        queue.put(("Log", f"Optimization failed with error: {e}"))
+        queue.put(("Log", "="*80))
 
     finally:
+        # Always log optimization metrics and run results, even if optimization failed
+        try:
+            # Log optimization metrics
+            log_to_file("\nOptimization metrics:", session_log_file)
+            log_to_file(f"  Total Xyce runs: {xyceRuns}", session_log_file)
+            log_to_file(f"  Least squares iterations: {leastSquaresIterations}", session_log_file)
+            log_to_file(f"  Initial cost: {initialCost}", session_log_file)
+            log_to_file(f"  Final cost: {finalCost}", session_log_file)
+            log_to_file(f"  Optimality: {optimality}", session_log_file)
+            
+            # Log only the last 3 run results at the end (even if optimization failed)
+            if all_run_results:  # Only log if we have run results
+                log_to_file("\n" + "="*80, session_log_file)
+                log_to_file("DETAILED RUN RESULTS (Last 3 runs only)", session_log_file)
+                log_to_file("="*80, session_log_file)
+                
+                # Only show the last 3 runs
+                last_runs = all_run_results[-3:] if len(all_run_results) >= 3 else all_run_results
+                start_run_num = max(1, len(all_run_results) - 2)  # Calculate starting run number
+                
+                for i, run_result in enumerate(last_runs):
+                    actual_run_num = start_run_num + i
+                    log_to_file(f"\n--- RUN {actual_run_num} DETAILS ---", session_log_file)
+                    for line in run_result:
+                        log_to_file(line, session_log_file)
+            
+            log_to_file("\n" + "="*80, session_log_file)
+            log_to_file("END OF OPTIMIZATION SESSION", session_log_file)
+            log_to_file("="*80 + "\n", session_log_file)
+            queue.put(("Log", "="*80))
+            queue.put(("Log", "END OF OPTIMIZATION SESSION"))
+            queue.put(("Log", "="*80))
+        except Exception as logging_error:
+            # If logging fails, at least try to log the error
+            try:
+                log_to_file(f"\nError during final logging: {logging_error}", session_log_file)
+            except:
+                pass  # If even this fails, just continue
+        
         sys.stdout = old_stdout  # Restore stdout no matter what
     return [xyceRuns, leastSquaresIterations, initialCost, finalCost, optimality]
 

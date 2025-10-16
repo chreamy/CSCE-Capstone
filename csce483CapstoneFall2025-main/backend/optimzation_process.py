@@ -2,7 +2,7 @@
 import os
 import shutil
 import numpy as np
-from backend.curvefit_optimization import curvefit_optimize
+from backend.curvefit_optimization import curvefit_optimize, get_current_session_number
 
 def add_part_constraints(constraints, netlist):
     equalConstraints = []
@@ -64,7 +64,14 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
         TEST_ROWS = testRows
         ORIG_NETLIST_PATH = netlistPath
         NETLIST = netlistObject
-        WRITABLE_NETLIST_PATH = ORIG_NETLIST_PATH[:-4]+"Copy.txt"
+        
+        # Get current session number and create optimized netlist path in session folder
+        session_num = get_current_session_number()
+        session_dir = os.path.join("runs", str(session_num))
+        if not os.path.exists(session_dir):
+            os.makedirs(session_dir)
+        WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
+        
         NODE_CONSTRAINTS = add_node_constraints(curveData["constraints"]) 
 
         print(f"TARGET_VALUE = {TARGET_VALUE}")
@@ -137,6 +144,18 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
         queue.put(("Update", f"Total Xyce Runs: {optim[0]}"))
         queue.put(("Done", f"Optimization Results:"))
     except Exception as e:
-        queue.put(("Failed",f"{e}"))
+        # Even if optimization fails, try to get partial results and log them
+        print(f"Optimization failed with error: {e}")
+        queue.put(("Failed", f"Optimization failed: {e}"))
+        
+        # Try to get partial results if available
+        try:
+            # The curvefit_optimize function should have logged the last 3 runs even on failure
+            # We can still try to update the netlist with whatever values were set
+            NETLIST.file_path = ORIG_NETLIST_PATH
+            queue.put(("UpdateNetlist", NETLIST))
+            queue.put(("Update", f"Optimization failed but partial results may be available in session log"))
+        except:
+            pass  # If even this fails, just continue
     finally:
         netlistObject.file_path = original_netlist_path
