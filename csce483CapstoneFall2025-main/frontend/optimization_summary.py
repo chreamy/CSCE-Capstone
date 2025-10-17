@@ -4,80 +4,446 @@ import multiprocessing as mp
 import threading as th
 from typing import Optional
 from backend.optimzation_process import optimizeProcess
+from datetime import datetime
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 class OptimizationSummary(tk.Frame):
+    
+    # Clean light theme color scheme
+    COLORS = {
+        'bg_primary': '#ffffff',
+        'bg_secondary': '#f8fafc',
+        'bg_tertiary': '#f1f5f9',
+        'accent': '#3b82f6',
+        'accent_hover': '#2563eb',
+        'success': '#10b981',
+        'warning': '#f59e0b',
+        'error': '#ef4444',
+        'text_primary': '#1e293b',
+        'text_secondary': '#64748b',
+        'border': '#e2e8f0',
+        'sidebar_bg': '#f1f5f9',
+        'log_bg': '#ffffff'
+    }
 
     def __init__(self, parent: tk.Tk, controller: "AppController"):
         super().__init__(parent)
         self.controller = controller
         self.parent = parent
-        self.parent.title("Optimization In Progress")
+        self.parent.title("Optimization Dashboard")
+        self.parent.configure(bg=self.COLORS['bg_primary'])
+        # Set minimum window size to accommodate sidebar
+        self.parent.minsize(800, 600)
         self.pack(fill=tk.BOTH, expand=True)
 
         self.queue: Optional[mp.Queue] = None
         self.thread: Optional[th.Thread] = None
         self.optimization_active = False
+        self.sidebar_visible = False
+        self.realtime_logs = []
 
-        main_frame = ttk.Frame(self)
-        main_frame.pack(expand=True, fill=tk.BOTH)
-        self.main_frame = main_frame
-        self.complete_label = ttk.Label(
-            main_frame,
-            text="Optimization In Progress",
-            font=("Arial", 16, "bold"),
-        )
-        self.complete_label.grid(row=0, column=0, pady=20, padx=20, sticky="nsew")
-
-        tree_frame = ttk.Frame(main_frame)
-        tree_frame.grid(row=1, column=0, pady=10, padx=20, sticky="nsew")
-
-        self.tree = ttk.Treeview(
-            tree_frame, columns=("Parameter", "Value"), show="headings"
-        )
-        self.tree.heading("Parameter", text="Parameter")
-        self.tree.heading("Value", text="Value")
-        self.tree.column("Parameter", anchor="w", width=200)
-        self.tree.column("Value", anchor="w", width=150)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-
-        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-
-        main_frame.grid_rowconfigure(1, weight=1)
-        main_frame.grid_columnconfigure(0, weight=1)
-
+        # Configure main container
+        self.configure(bg=self.COLORS['bg_primary'])
+        
+        # Create main layout
+        self._create_main_layout()
+        self._create_sidebar()
+        self._create_status_cards()
+        self._create_plot_section()
+        self._create_control_buttons()
+        
+        # Load data and start
         self._load_context()
         self._prepare_target_data()
         self._build_plot()
-
-        self.back_to_settings_button = ttk.Button(
-            main_frame,
-            text="Modify Settings",
-            command=self.return_to_settings,
-            state=tk.DISABLED,
-        )
-        self.back_to_settings_button.grid(row=3, column=0, pady=5, padx=20, sticky="w")
-
-        self.continue_button = ttk.Button(
-            main_frame,
-            text="Close",
-            command=self.close_window,
-        )
-        self.continue_button.grid(row=3, column=0, pady=5, padx=20, sticky="e")
-
-        main_frame.grid_rowconfigure(2, weight=1)
-        main_frame.grid_rowconfigure(3, weight=0)
-
+        
         self.parent.after(100, self.update_ui)
         self.start_optimization()
+        
+        # Bind window resize event to maintain proper layout
+        self.parent.bind('<Configure>', self._on_window_resize)
+
+    def _create_main_layout(self):
+        """Create the main layout container"""
+        # Main content area
+        self.content_frame = tk.Frame(self, bg=self.COLORS['bg_primary'])
+        self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Don't propagate size changes to parent
+        self.content_frame.pack_propagate(False)
+        
+        # Header
+        self.header_frame = tk.Frame(self.content_frame, bg=self.COLORS['bg_secondary'], height=80, relief=tk.FLAT, bd=1)
+        self.header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
+        self.header_frame.pack_propagate(False)
+        
+        # Status label
+        self.status_label = tk.Label(
+            self.header_frame,
+            text="Optimization In Progress",
+            font=("Segoe UI", 24, "bold"),
+            fg=self.COLORS['text_primary'],
+            bg=self.COLORS['bg_secondary']
+        )
+        self.status_label.pack(side=tk.LEFT, padx=30, pady=20)
+        
+        # Toggle sidebar button
+        self.sidebar_toggle = tk.Button(
+            self.header_frame,
+            text="📋 Logs",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['accent'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=20,
+            pady=10,
+            command=self._toggle_sidebar,
+            cursor="hand2"
+        )
+        self.sidebar_toggle.pack(side=tk.RIGHT, padx=30, pady=20)
+
+    def _create_sidebar(self):
+        """Create the collapsible sidebar for logs"""
+        self.sidebar = tk.Frame(self, bg=self.COLORS['sidebar_bg'], width=300, relief=tk.FLAT, bd=1)
+        # Prevent sidebar from expanding beyond its specified width
+        self.sidebar.pack_propagate(False)
+        
+        # Sidebar header
+        sidebar_header = tk.Frame(self.sidebar, bg=self.COLORS['bg_tertiary'], height=60, relief=tk.FLAT, bd=1)
+        sidebar_header.pack(fill=tk.X, padx=0, pady=0)
+        sidebar_header.pack_propagate(False)
+        
+        tk.Label(
+            sidebar_header,
+            text="Real-time Logs",
+            font=("Segoe UI", 16, "bold"),
+            fg=self.COLORS['text_primary'],
+            bg=self.COLORS['bg_tertiary']
+        ).pack(side=tk.LEFT, padx=20, pady=15)
+        
+        
+        # Close sidebar button
+        close_btn = tk.Button(
+            sidebar_header,
+            text="✕",
+            font=("Segoe UI", 14),
+            bg=self.COLORS['bg_tertiary'],
+            fg=self.COLORS['text_secondary'],
+            bd=1,
+            relief=tk.FLAT,
+            command=self._toggle_sidebar,
+            cursor="hand2"
+        )
+        close_btn.pack(side=tk.RIGHT, padx=20, pady=15)
+        
+        # Logs container
+        logs_container = tk.Frame(self.sidebar, bg=self.COLORS['log_bg'])
+        logs_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Logs text widget
+        self.logs_text = tk.Text(
+            logs_container,
+            bg=self.COLORS['log_bg'],
+            fg=self.COLORS['text_primary'],
+            font=("Consolas", 10),
+            wrap=tk.WORD,
+            bd=1,
+            relief=tk.FLAT,
+            padx=15,
+            pady=15,
+            state=tk.DISABLED
+        )
+        
+        # Scrollbar for logs
+        logs_scrollbar = tk.Scrollbar(logs_container, orient="vertical", command=self.logs_text.yview)
+        self.logs_text.configure(yscrollcommand=logs_scrollbar.set)
+        
+        self.logs_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        logs_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def _create_status_cards(self):
+        """Create status display for optimization progress and results"""
+        self.status_display_frame = tk.Frame(self.content_frame, bg=self.COLORS['bg_primary'])
+        self.status_display_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        # Main status container
+        self.status_container = tk.Frame(self.status_display_frame, bg=self.COLORS['bg_secondary'], relief=tk.FLAT, bd=1)
+        self.status_container.pack(fill=tk.X, padx=5)
+        
+        # Computing message and loading indicator
+        self.computing_frame = tk.Frame(self.status_container, bg=self.COLORS['bg_secondary'])
+        self.computing_frame.pack(fill=tk.X, pady=20)
+        
+        # Loading indicator (spinning circle)
+        self.loading_label = tk.Label(
+            self.computing_frame,
+            text="◐",
+            font=("Segoe UI", 24),
+            bg=self.COLORS['bg_secondary'],
+            fg=self.COLORS['accent']
+        )
+        self.loading_label.pack(pady=(0, 10))
+        
+        # Computing message
+        self.computing_label = tk.Label(
+            self.computing_frame,
+            text="Xyce computing...",
+            font=("Segoe UI", 16, "bold"),
+            fg=self.COLORS['text_primary'],
+            bg=self.COLORS['bg_secondary']
+        )
+        self.computing_label.pack()
+        
+        # Run count display
+        self.run_count_label = tk.Label(
+            self.computing_frame,
+            text="Runs: 0",
+            font=("Segoe UI", 14),
+            fg=self.COLORS['accent'],
+            bg=self.COLORS['bg_secondary']
+        )
+        self.run_count_label.pack(pady=(5, 0))
+        
+        # Results display (initially hidden)
+        self.results_frame = tk.Frame(self.status_container, bg=self.COLORS['bg_secondary'])
+        
+        # Results title
+        self.results_title = tk.Label(
+            self.results_frame,
+            text="Optimization Results",
+            font=("Segoe UI", 16, "bold"),
+            fg=self.COLORS['text_primary'],
+            bg=self.COLORS['bg_secondary']
+        )
+        self.results_title.pack(pady=(20, 10))
+        
+        # Results display
+        self.results_label = tk.Label(
+            self.results_frame,
+            text="",
+            font=("Consolas", 14, "bold"),
+            fg=self.COLORS['success'],
+            bg=self.COLORS['bg_secondary'],
+            justify=tk.CENTER
+        )
+        self.results_label.pack(pady=(0, 10))
+        
+        # Action buttons in results frame
+        self.results_buttons_frame = tk.Frame(self.results_frame, bg=self.COLORS['bg_secondary'])
+        self.results_buttons_frame.pack(pady=(0, 20))
+        
+        # Restart button
+        self.restart_button = tk.Button(
+            self.results_buttons_frame,
+            text="Restart",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['success'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.restart_optimization,
+            cursor="hand2"
+        )
+        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Close button
+        self.close_button = tk.Button(
+            self.results_buttons_frame,
+            text="Close",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['accent'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.close_window,
+            cursor="hand2"
+        )
+        self.close_button.pack(side=tk.LEFT)
+        
+        # Initialize with computing state
+        self._show_computing_state()
+
+    def _show_computing_state(self):
+        """Show the computing state with loading indicator"""
+        self.computing_frame.pack(fill=tk.X, pady=20)
+        self.results_frame.pack_forget()
+        self.run_count_label.config(text="Runs: 0")
+        self._animate_loading()
+
+    def _show_results_state(self, results):
+        """Show the final optimization results"""
+        self.computing_frame.pack_forget()
+        self.results_frame.pack(fill=tk.X, pady=20)
+        
+        # Format results as requested: [10, 2, 17189.0, 17189.0, 9.54e-13]
+        results_text = str(results)
+        self.results_label.config(text=results_text)
+
+    def _animate_loading(self):
+        """Animate the loading indicator with spinning icons"""
+        if hasattr(self, 'loading_label') and self.optimization_active:
+            # Use spinning/rotating symbols that are closer together
+            symbols = ["◐", "◓", "◑", "◒"]  # Spinning circle segments
+            current_symbol = self.loading_label.cget("text")
+            try:
+                current_index = symbols.index(current_symbol)
+                next_index = (current_index + 1) % len(symbols)
+            except ValueError:
+                next_index = 0
+            
+            self.loading_label.config(text=symbols[next_index])
+            # Faster animation for smoother spinning effect
+            self.parent.after(150, self._animate_loading)
+
+    def _create_plot_section(self):
+        """Create the plot section"""
+        self.plot_frame = tk.Frame(self.content_frame, bg=self.COLORS['bg_secondary'], relief=tk.FLAT, bd=1)
+        self.plot_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Plot title
+        tk.Label(
+            self.plot_frame,
+            text="Optimization Progress",
+            font=("Segoe UI", 16, "bold"),
+            fg=self.COLORS['text_primary'],
+            bg=self.COLORS['bg_secondary']
+        ).pack(pady=(20, 10))
+
+    def _create_control_buttons(self):
+        """Create control buttons"""
+        self.buttons_frame = tk.Frame(self.content_frame, bg=self.COLORS['bg_primary'])
+        self.buttons_frame.pack(fill=tk.X, padx=20, pady=(10, 20))
+        
+        # Modify Settings button (shown during optimization)
+        self.back_to_settings_button = tk.Button(
+            self.buttons_frame,
+            text="Modify Settings",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['bg_tertiary'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.return_to_settings,
+            state=tk.DISABLED,
+            cursor="hand2"
+        )
+        self.back_to_settings_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Restart button (shown when optimization is complete)
+        self.restart_button = tk.Button(
+            self.buttons_frame,
+            text="Restart",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['success'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.restart_optimization,
+            cursor="hand2"
+        )
+        # Initially hidden
+        self.restart_button.pack_forget()
+        
+        # Close button
+        self.continue_button = tk.Button(
+            self.buttons_frame,
+            text="Close",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['accent'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.close_window,
+            cursor="hand2"
+        )
+        self.continue_button.pack(side=tk.RIGHT)
+
+    def _toggle_sidebar(self):
+        """Toggle sidebar visibility with proper resizing"""
+        if self.sidebar_visible:
+            # Hide sidebar and expand main content to full width
+            self.sidebar.pack_forget()
+            self.sidebar_visible = False
+            # Remove width constraint from content frame
+            self.content_frame.configure(width=0)  # Reset to auto-size
+            self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        else:
+            # Show sidebar first
+            self.sidebar.pack(side=tk.RIGHT, fill=tk.Y, expand=False)
+            self.sidebar_visible = True
+            
+            # Force update to get current window size
+            self.parent.update_idletasks()
+            
+            # Calculate and set content frame width to (screen width - 300px)
+            window_width = self.parent.winfo_width()
+            content_width = window_width - 300  # Reserve 300px for sidebar
+            
+            # Repack content frame with new width
+            self.content_frame.pack_forget()
+            self.content_frame.configure(width=content_width)
+            self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
+            
+            # Force update to ensure proper layout
+            self.parent.update_idletasks()
+
+    def _on_window_resize(self, event):
+        """Handle window resize to maintain proper layout when sidebar is open"""
+        # Only handle main window resize events
+        if event.widget == self.parent and self.sidebar_visible:
+            # Debounce resize events
+            if hasattr(self, '_resize_timer'):
+                self.parent.after_cancel(self._resize_timer)
+            self._resize_timer = self.parent.after(100, self._adjust_content_width)
+
+    def _adjust_content_width(self):
+        """Adjust content frame width when window is resized"""
+        if self.sidebar_visible:
+            window_width = self.parent.winfo_width()
+            content_width = window_width - 300  # Reserve 300px for sidebar
+            
+            # Repack content frame with new width
+            self.content_frame.pack_forget()
+            self.content_frame.configure(width=content_width)
+            self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
+
+    def _clear_logs(self):
+        """Clear all logs from the sidebar"""
+        self.logs_text.config(state=tk.NORMAL)
+        self.logs_text.delete(1.0, tk.END)
+        self.logs_text.config(state=tk.DISABLED)
+        self.realtime_logs.clear()
+        self._add_log_entry("Logs cleared", "INFO")
+
+    def _add_log_entry(self, message, level="INFO"):
+        """Add a log entry to the real-time logs"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {level}: {message}\n"
+        
+        self.realtime_logs.append(log_entry)
+        
+        # Keep only last 1000 entries
+        if len(self.realtime_logs) > 1000:
+            self.realtime_logs = self.realtime_logs[-1000:]
+        
+        # Always update logs display, regardless of sidebar visibility
+        self.logs_text.config(state=tk.NORMAL)
+        self.logs_text.insert(tk.END, log_entry)
+        self.logs_text.see(tk.END)
+        self.logs_text.config(state=tk.DISABLED)
 
     def _load_context(self) -> None:
         self.curveData = self.controller.get_app_data("optimization_settings") or {}
@@ -103,26 +469,40 @@ class OptimizationSummary(tk.Frame):
             self.maxBound = 1
 
     def _build_plot(self) -> None:
-        self.figure = Figure(figsize=(5, 2), dpi=100)
-        self.ax = self.figure.add_subplot(111)
-        self.ax.set_title("Optimization Progress")
-        self.ax.set_xlabel("Time")
+        self.figure = Figure(figsize=(8, 4), dpi=100, facecolor=self.COLORS['bg_secondary'])
+        self.ax = self.figure.add_subplot(111, facecolor=self.COLORS['bg_secondary'])
+        
+        # Configure plot styling
+        self.ax.set_xlabel("Time", color=self.COLORS['text_secondary'], fontsize=12)
         y_label = self.curveData.get("y_parameter", "")
-        self.ax.set_ylabel(f"{y_label}")
-        self.figure.subplots_adjust(bottom=0.2)
-        self.line, = self.ax.plot([], [], label="Simulation")
+        self.ax.set_ylabel(f"{y_label}", color=self.COLORS['text_secondary'], fontsize=12)
+        
+        # Style the axes
+        self.ax.tick_params(colors=self.COLORS['text_secondary'])
+        self.ax.spines['bottom'].set_color(self.COLORS['border'])
+        self.ax.spines['top'].set_color(self.COLORS['border'])
+        self.ax.spines['right'].set_color(self.COLORS['border'])
+        self.ax.spines['left'].set_color(self.COLORS['border'])
+        
+        self.figure.subplots_adjust(bottom=0.15, left=0.1, right=0.95, top=0.9)
+        
+        # Plot lines
+        self.line, = self.ax.plot([], [], color=self.COLORS['accent'], linewidth=2, label="Simulation")
         self.line2, = self.ax.plot(
-            [], [], color="red", linestyle="--", label="Target"
+            [], [], color=self.COLORS['success'], linestyle="--", linewidth=2, label="Target"
         )
+        
         if self.target_x and self.target_y:
             self.line2.set_data(self.target_x, self.target_y)
         self.ax.set_ylim(self.minBound, self.maxBound)
+        
+        # Legend
+        self.ax.legend(loc='upper right', frameon=True, facecolor=self.COLORS['bg_tertiary'], 
+                      edgecolor=self.COLORS['border'], labelcolor=self.COLORS['text_primary'])
 
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.main_frame)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.plot_frame)
         self.canvas.draw()
-        self.canvas.get_tk_widget().grid(
-            row=2, column=0, pady=10, padx=20, sticky="nsew"
-        )
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
     def start_optimization(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -161,14 +541,15 @@ class OptimizationSummary(tk.Frame):
                 self.canvas.draw()
 
     def _reset_status_view(self) -> None:
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        self.complete_label.config(text="Optimization In Progress")
+        self.status_label.config(text="Optimization In Progress", fg=self.COLORS['text_primary'])
         if hasattr(self, "line"):
             self.line.set_data([], [])
         self.ax.set_ylim(self.minBound, self.maxBound)
         if hasattr(self, "canvas"):
             self.canvas.draw()
+        
+        # Reset to computing state
+        self._show_computing_state()
 
     def _cleanup_worker(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -187,40 +568,79 @@ class OptimizationSummary(tk.Frame):
         self._cleanup_worker()
         self.controller.navigate("optimization_settings")
 
+    def restart_optimization(self) -> None:
+        """Restart from netlist upload step"""
+        self._cleanup_worker()
+        # Navigate back to netlist uploader to start fresh
+        self.controller.navigate("netlist_uploader")
+
     def update_ui(self) -> None:
         try:
             if self.queue:
+                # Process ALL messages in queue every 100ms
+                messages_processed = 0
                 while not self.queue.empty():
-                    msg_type, msg_value = self.queue.get_nowait()
-                    if msg_type == "Update":
-                        self.tree.insert("", 0, values=("Update:", msg_value))
-                    elif msg_type == "Done":
-                        self.tree.insert("", 0, values=("", msg_value))
-                        self.complete_label.config(text="Optimization Complete")
-                        self.optimization_active = False
-                        self.back_to_settings_button.config(state=tk.NORMAL)
-                    elif msg_type == "Failed":
-                        self.tree.insert(
-                            "", 0, values=("Optimization Failed", msg_value)
-                        )
-                        self.complete_label.config(text="Optimization Failed")
-                        self.optimization_active = False
-                        self.back_to_settings_button.config(state=tk.NORMAL)
-                    elif msg_type == "UpdateNetlist":
-                        self.controller.update_app_data("netlist_object", msg_value)
-                    elif msg_type == "UpdateOptimizationResults":
-                        self.controller.update_app_data(
-                            "optimization_results", msg_value
-                        )
-                    elif msg_type == "UpdateYData":
-                        self.update_graph(msg_value)
+                    try:
+                        msg_type, msg_value = self.queue.get_nowait()
+                        messages_processed += 1
+                        
+                        if msg_type == "Update":
+                            self._add_log_entry(msg_value, "INFO")
+                            # Extract run count from update messages
+                            if "total runs completed:" in msg_value:
+                                try:
+                                    run_count = int(msg_value.split(":")[-1].strip())
+                                    self.run_count_label.config(text=f"Runs: {run_count}")
+                                except:
+                                    pass
+                        elif msg_type == "Log":
+                            # Direct log messages from backend
+                            self._add_log_entry(msg_value, "INFO")
+                        elif msg_type == "Done":
+                            self._add_log_entry(msg_value, "SUCCESS")
+                            self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
+                            self.optimization_active = False
+                            # Show restart button, hide modify settings button
+                            self.back_to_settings_button.pack_forget()
+                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                        elif msg_type == "Failed":
+                            self._add_log_entry(f"Optimization Failed: {msg_value}", "ERROR")
+                            self.status_label.config(text="Optimization Failed", fg=self.COLORS['error'])
+                            self.optimization_active = False
+                            # Show restart button, hide modify settings button
+                            self.back_to_settings_button.pack_forget()
+                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                        elif msg_type == "UpdateNetlist":
+                            self.controller.update_app_data("netlist_object", msg_value)
+                            self._add_log_entry("Netlist updated", "INFO")
+                        elif msg_type == "UpdateOptimizationResults":
+                            self.controller.update_app_data("optimization_results", msg_value)
+                            self._show_results_state(msg_value)
+                            self._add_log_entry("Optimization results updated", "SUCCESS")
+                        elif msg_type == "UpdateYData":
+                            self.update_graph(msg_value)
+                        else:
+                            # Handle unknown message types
+                            self._add_log_entry(f"Unknown message type: {msg_type} - {msg_value}", "WARNING")
+                            
+                    except Exception as msg_error:
+                        self._add_log_entry(f"Error processing message: {msg_error}", "ERROR")
+                        continue
+                
+                # Log batch processing info if we processed multiple messages
+                if messages_processed > 1:
+                    self._add_log_entry(f"Processed {messages_processed} messages in this update cycle", "DEBUG")
+                    
         except Exception as e:
             print("UI Update Error:", e)
+            self._add_log_entry(f"UI Update Error: {e}", "ERROR")
 
         if not self.optimization_active:
             self._cleanup_worker()
 
+        # Continue the update loop every 100ms
         self.parent.after(100, self.update_ui)
+
 
     def update_graph(self, xy_data) -> None:
         data = tuple(xy_data)
@@ -236,6 +656,14 @@ class OptimizationSummary(tk.Frame):
             lower = self.minBound
             upper = self.maxBound
         self.ax.set_ylim(lower, upper)
+        
+        # Update plot styling
+        self.ax.tick_params(colors=self.COLORS['text_secondary'])
+        self.ax.spines['bottom'].set_color(self.COLORS['border'])
+        self.ax.spines['top'].set_color(self.COLORS['border'])
+        self.ax.spines['right'].set_color(self.COLORS['border'])
+        self.ax.spines['left'].set_color(self.COLORS['border'])
+        
         self.canvas.draw()
 
     def close_window(self) -> None:
