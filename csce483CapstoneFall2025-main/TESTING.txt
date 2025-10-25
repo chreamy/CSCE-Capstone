@@ -1,0 +1,31 @@
+Manual / Regression Test Instructions
+====================================
+
+These scripts exercise the lengthy optimization scenarios we added for the
+Instrumentation Amplifier netlists. They rely on the same Python environment
+used for the main app (numpy, scipy, etc.).
+
+From the project root (`csce483CapstoneFall2025-main`), activate the virtual
+environment and run:
+
+1. Long transient stress test
+   ```
+   python -m backend.manual_tests.long_instr_amp_test
+   ```
+   - Drives a 5k-point transient target through the optimizer with widened
+     bounds and tight tolerances.
+   - Expect a long runtime; use it sparingly as a regression/stability check.
+
+2. Long AC stress test
+   ```
+   python -m backend.manual_tests.long_instr_amp_ac_test
+   ```
+   - Mirrors the transient test but targets the AC magnitude response and
+     produces thousands of frequency samples.
+   - Also runs for an extended period and is intended to catch performance
+     regressions.
+
+Both scripts log their detailed progress under the `runs/` directory (just like
+the UI-driven workflows), so you can compare `session.log` and generated PRN
+files after they finish.
+
