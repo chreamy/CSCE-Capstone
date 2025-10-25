@@ -95,9 +95,9 @@ def add_node_constraints(constraints, analysis_type="transient", ac_response="ma
         lower, upper = formatted_constraints.get(key, (None, None))
 
         if operator == ">=":
-            lower = value
+            lower = value if lower is None else max(lower, value)
         elif operator == "<=":
-            upper = value
+            upper = value if upper is None else min(upper, value)
         formatted_constraints[key] = (lower, upper)
 
     return formatted_constraints
