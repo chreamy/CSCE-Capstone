@@ -68,10 +68,6 @@ class OptimizationSummary(tk.Frame):
         self._message_batch_limit = 40
         self._initial_cost: Optional[float] = None
         self._latest_simulation = None
-        self.convergence_window.protocol("WM_DELETE_WINDOW", lambda: None)
-        self._graph_update_counter = 0
-        self._message_batch_limit = 40
-        self._initial_cost: Optional[float] = None
 
         # Configure main container
         self.configure(bg=self.COLORS['bg_primary'])
