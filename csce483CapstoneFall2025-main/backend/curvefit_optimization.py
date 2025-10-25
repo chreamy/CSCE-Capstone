@@ -3,6 +3,7 @@ import subprocess
 import io
 import sys
 import os
+import glob
 from datetime import datetime
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
@@ -80,10 +81,24 @@ node_constraints = {
     'V(3)': (1.0, None)   # Example: V(3) must be >= 1V
 }
 """
-def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list,queue, custom_xtol= 1e-12,custom_gtol= 1e-12,custom_ftol= 1e-12) -> None:
+def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list, queue, custom_xtol=1e-12, custom_gtol=1e-12, custom_ftol=1e-12, analysis_type="transient", x_parameter="TIME", ac_response="magnitude") -> None:
     # Get the session log file path
     session_log_file = get_session_log_file()
     
+    analysis_mode = (analysis_type or "transient").strip().lower()
+    x_axis_identifier = (x_parameter or "TIME").strip().upper()
+    response_aliases = {
+        "mag": "magnitude",
+        "magnitude": "magnitude",
+        "db": "magnitude_db",
+        "magnitude_db": "magnitude_db",
+        "phase": "phase",
+        "angle": "phase",
+        "real": "real",
+        "imag": "imag",
+    }
+    response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
+
     # Initialize log file with session header
     session_start_time = datetime.now()
     log_to_file("="*80, session_log_file)
@@ -92,6 +107,17 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
     log_to_file(f"Target value: {target_value}", session_log_file)
     log_to_file(f"Netlist file: {writable_netlist_path}", session_log_file)
     log_to_file(f"Node constraints: {node_constraints}", session_log_file)
+    log_to_file(f"Analysis type: {analysis_mode}", session_log_file)
+    log_to_file(f"X-axis variable: {x_axis_identifier}", session_log_file)
+    if analysis_mode == "ac":
+        response_label = {
+            "magnitude": "magnitude",
+            "magnitude_db": "magnitude (dB)",
+            "phase": "phase",
+            "real": "real",
+            "imag": "imag",
+        }.get(response_mode, response_mode)
+        log_to_file(f"AC response: {response_label}", session_log_file)
     log_to_file(f"Optimization parameters:", session_log_file)
     log_to_file(f"  xtol: {custom_xtol}", session_log_file)
     log_to_file(f"  gtol: {custom_gtol}", session_log_file)
@@ -105,6 +131,10 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
     queue.put(("Log", f"Target value: {target_value}"))
     queue.put(("Log", f"Netlist file: {writable_netlist_path}"))
     queue.put(("Log", f"Node constraints: {node_constraints}"))
+    queue.put(("Log", f"Analysis type: {analysis_mode}"))
+    queue.put(("Log", f"X-axis variable: {x_axis_identifier}"))
+    if analysis_mode == "ac":
+        queue.put(("Log", f"AC response: {response_label}"))
     queue.put(("Log", f"Optimization parameters:"))
     queue.put(("Log", f"  xtol: {custom_xtol}"))
     queue.put(("Log", f"  gtol: {custom_gtol}"))
@@ -146,6 +176,31 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             "master_x_points": np.array([])
         }
 
+        output_suffixes = [".prn"]
+        if analysis_mode == "ac":
+            output_suffixes = [".FD.prn"] + output_suffixes
+
+        def _remove_old_outputs(base_path: str) -> None:
+            for suffix in output_suffixes:
+                candidate = base_path + suffix
+                if os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except OSError:
+                        pass
+
+        def _resolve_output_file(base_path: str) -> str:
+            for suffix in output_suffixes:
+                candidate = base_path + suffix
+                if os.path.exists(candidate):
+                    return candidate
+            pattern = base_path + "*.prn"
+            matches = glob.glob(pattern)
+            if matches:
+                matches.sort(key=os.path.getmtime, reverse=True)
+                return matches[0]
+            raise FileNotFoundError(f"No Xyce output file found for {base_path}")
+
         def residuals(component_values, components):
             global xyceRuns
             xyceRuns += 1
@@ -174,7 +229,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                         component.modified = True
             
             new_netlist.class_to_file(local_netlist_file)
-            
+            _remove_old_outputs(local_netlist_file)
+
             # Store run information for later logging
             run_info = []
             
@@ -243,8 +299,9 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                         log_and_append(f"  {line}", run_info, queue, session_log_file)
             
             # Store parsing attempt
-            log_and_append(f"Attempting to parse output file: {local_netlist_file}.prn", run_info, queue, session_log_file)
-            xyce_parse = parse_xyce_prn_output(local_netlist_file + ".prn")
+            output_file = _resolve_output_file(local_netlist_file)
+            log_and_append(f"Attempting to parse output file: {output_file}", run_info, queue, session_log_file)
+            xyce_parse = parse_xyce_prn_output(output_file)
             log_and_append(f"Successfully parsed output file. Found {len(xyce_parse[1])} data points", run_info, queue, session_log_file)
             
             # Store this run's results
@@ -286,11 +343,14 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                 available = ", ".join(headers)
                 raise ValueError(f"{kind} '{identifier}' not found in Xyce output columns: {available}")
 
-            # Assumes Xyce output is Index, Time, arb. # of VALUES
+            x_index = resolve_header_index(x_axis_identifier, "X-axis variable")
             row_index = resolve_header_index(target_value, "Target variable")
 
-            X_ARRAY_FROM_XYCE = np.array([float(x[1]) for x in xyce_parse[1]])
-            Y_ARRAY_FROM_XYCE = np.array([float(x[row_index]) for x in xyce_parse[1]])
+            X_ARRAY_FROM_XYCE = np.array([float(row[x_index]) for row in xyce_parse[1]])
+            Y_ARRAY_FROM_XYCE = np.array([float(row[row_index]) for row in xyce_parse[1]])
+            if analysis_mode == "ac":
+                if response_mode == "magnitude_db":
+                    Y_ARRAY_FROM_XYCE = 20.0 * np.log10(np.maximum(Y_ARRAY_FROM_XYCE, 1e-30))
 
             if run_state["first_run"]:
                 run_state["first_run"] = False
@@ -299,13 +359,15 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
 
             # Send run count update for every run
             queue.put(("Update",f"total runs completed: {xyceRuns}"))
-            queue.put(("UpdateYData",(X_ARRAY_FROM_XYCE,Y_ARRAY_FROM_XYCE))) 
+            queue.put(("UpdateYData",(analysis_mode, response_mode, X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE))) 
 
             xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
 
             for node_name, (node_lower, node_upper) in node_constraints.items():
                 node_index = resolve_header_index(node_name, "Node variable")
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
+                if analysis_mode == "ac" and response_mode == "magnitude_db" and node_name.startswith("VM("):
+                    node_values = 20.0 * np.log10(np.maximum(node_values, 1e-30))
                 if (node_lower is not None and np.any(node_values < node_lower)) or (node_upper is not None and np.any(node_values > node_upper)):
                     return np.full_like(run_state["master_x_points"], 1e6)  # TODO: Right now its just an arbitrarily large penalty
 

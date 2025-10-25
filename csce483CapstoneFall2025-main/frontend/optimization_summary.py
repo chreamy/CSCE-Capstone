@@ -1,10 +1,12 @@
 import tkinter as tk
 from tkinter import ttk
-import multiprocessing as mp
+import queue
 import threading as th
 from typing import Optional
 from backend.optimzation_process import optimizeProcess
 from datetime import datetime
+import math
+import numpy as np
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -39,11 +41,33 @@ class OptimizationSummary(tk.Frame):
         self.parent.minsize(800, 600)
         self.pack(fill=tk.BOTH, expand=True)
 
-        self.queue: Optional[mp.Queue] = None
+        self.queue: Optional[queue.Queue] = None
         self.thread: Optional[th.Thread] = None
         self.optimization_active = False
         self.sidebar_visible = False
         self.realtime_logs = []
+        self.convergence_window = tk.Toplevel(self.parent)
+        self.convergence_window.title("Convergence")
+        self.convergence_window.geometry("240x150")
+        self.convergence_window.transient(self.parent)
+        self.convergence_window.resizable(False, False)
+        self.convergence_label = tk.Label(
+            self.convergence_window,
+            text="Convergence: -- %",
+            font=("Segoe UI", 12)
+        )
+        self.convergence_label.pack(padx=20, pady=(18, 5))
+        self.error_label = tk.Label(
+            self.convergence_window,
+            text="Max Error: --\nRMS Error: --",
+            font=("Segoe UI", 11)
+        )
+        self.error_label.pack(padx=20, pady=(0, 12))
+        self.convergence_window.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._graph_update_counter = 0
+        self._message_batch_limit = 40
+        self._initial_cost: Optional[float] = None
+        self._latest_simulation = None
 
         # Configure main container
         self.configure(bg=self.COLORS['bg_primary'])
@@ -285,6 +309,56 @@ class OptimizationSummary(tk.Frame):
         # Format results as requested: [10, 2, 17189.0, 17189.0, 9.54e-13]
         results_text = str(results)
         self.results_label.config(text=results_text)
+        if isinstance(results, (list, tuple)) and len(results) >= 4:
+            try:
+                initial_cost = float(results[2])
+                final_cost = float(results[3])
+            except (TypeError, ValueError):
+                initial_cost = None
+                final_cost = None
+            if initial_cost is not None:
+                self._update_convergence_label(initial_cost, final_cost)
+                self._update_error_label()
+
+
+    def _update_convergence_label(self, initial_cost: float, final_cost: float) -> None:
+        label = getattr(self, 'convergence_label', None)
+        if label is None:
+            return
+        try:
+            if initial_cost and initial_cost != 0:
+                improvement = (initial_cost - final_cost) / abs(initial_cost) * 100.0
+            else:
+                improvement = 0.0
+        except Exception:
+            improvement = 0.0
+        improvement = max(0.0, improvement)
+        label.config(text=f"Convergence: {improvement:.2f} %")
+        self._initial_cost = initial_cost
+
+    def _update_error_label(self) -> None:
+        label = getattr(self, "error_label", None)
+        if label is None:
+            return
+        if not hasattr(self, "target_x") or not hasattr(self, "target_y"):
+            return
+        if not self.target_x or not self.target_y:
+            return
+        data = getattr(self, "_latest_simulation", None)
+        if not data:
+            return
+        x_data, y_data = data
+        if not x_data or not y_data:
+            return
+        try:
+            target_interp = np.interp(x_data, self.target_x, self.target_y)
+            diff = np.array(y_data) - target_interp
+            max_err = float(np.max(np.abs(diff)))
+            rms_err = float(np.sqrt(np.mean(diff ** 2)))
+        except Exception:
+            label.config(text="Max Error: --\nRMS Error: --")
+            return
+        label.config(text=f"Max Error: {max_err:.3g}\nRMS Error: {rms_err:.3g}")
 
     def _animate_loading(self):
         """Animate the loading indicator with spinning icons"""
@@ -453,29 +527,64 @@ class OptimizationSummary(tk.Frame):
         self.selectedParameters = self.controller.get_app_data("selected_parameters")
         self.optimizationTolerances = self.controller.get_app_data("optimization_tolerances")
         self.RLCBounds = self.controller.get_app_data("RLC_bounds")
+        self.analysis_type = (self.curveData.get("analysis_type") or "transient").lower()
+        self.ac_settings = self.curveData.get("ac_settings") or {}
+        self.ac_response = (self.ac_settings.get("response") or "magnitude").lower()
+        self.x_parameter = self.curveData.get("x_parameter", "TIME")
+        default_x_label = "Frequency (Hz)" if self.analysis_type == "ac" else "Time (s)"
+        self.x_parameter_display = self.curveData.get("x_parameter_display") or default_x_label
+        self.y_parameter_display = (
+            self.curveData.get("y_parameter_display")
+            or self.curveData.get("y_units")
+            or self.curveData.get("y_parameter")
+            or ""
+        )
+        self.y_parameter_expression = (
+            self.curveData.get("y_parameter_expression") or self.curveData.get("y_parameter") or ""
+        )
 
     def _prepare_target_data(self) -> None:
         self.target_x = []
         self.target_y = []
+        processed_rows = []
         if self.testRows:
-            self.target_x = [row[0] for row in self.testRows]
-            self.target_y = [row[1] for row in self.testRows]
+            for row in self.testRows:
+                try:
+                    x_val = float(row[0])
+                    y_val = float(row[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if self.analysis_type == "ac" and self.ac_response == "magnitude_db":
+                    if y_val <= 0:
+                        y_val = 1e-30
+                    y_val = 20.0 * math.log10(y_val)
+                processed_rows.append([x_val, y_val])
+
+        if processed_rows:
+            self.target_x = [row[0] for row in processed_rows]
+            self.target_y = [row[1] for row in processed_rows]
             range_y = max(self.target_y) - min(self.target_y)
-            margin = max(range_y * 0.25, 1)
+            default_margin = 5 if (self.analysis_type == "ac" and self.ac_settings.get("response") == "magnitude_db") else 1
+            margin = max(range_y * 0.25, default_margin)
             self.minBound = min(self.target_y) - margin
             self.maxBound = max(self.target_y) + margin
         else:
             self.minBound = 0
             self.maxBound = 1
+        self.processed_test_rows = processed_rows
 
     def _build_plot(self) -> None:
         self.figure = Figure(figsize=(8, 4), dpi=100, facecolor=self.COLORS['bg_secondary'])
         self.ax = self.figure.add_subplot(111, facecolor=self.COLORS['bg_secondary'])
         
         # Configure plot styling
-        self.ax.set_xlabel("Time", color=self.COLORS['text_secondary'], fontsize=12)
-        y_label = self.curveData.get("y_parameter", "")
-        self.ax.set_ylabel(f"{y_label}", color=self.COLORS['text_secondary'], fontsize=12)
+        self.ax.set_xlabel(self.x_parameter_display, color=self.COLORS['text_secondary'], fontsize=12)
+        self.ax.set_ylabel(self.y_parameter_display, color=self.COLORS['text_secondary'], fontsize=12)
+        if self.analysis_type == "ac":
+            try:
+                self.ax.set_xscale("log")
+            except ValueError:
+                pass
         
         # Style the axes
         self.ax.tick_params(colors=self.COLORS['text_secondary'])
@@ -505,29 +614,36 @@ class OptimizationSummary(tk.Frame):
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
     def start_optimization(self) -> None:
+        if getattr(self, "convergence_label", None):
+            self.convergence_label.config(text="Convergence: -- %")
+        self._initial_cost = None
+        if getattr(self, "error_label", None):
+            self.error_label.config(text="Max Error: --\nRMS Error: --")
+        self._latest_simulation = None
         if self.thread and self.thread.is_alive():
             return
         self._load_context()
         self._prepare_target_data()
         self._update_target_plot()
         self.back_to_settings_button.config(state=tk.DISABLED)
+        self._graph_update_counter = 0
         self.optimization_active = True
         self._reset_status_view()
-        self.queue = mp.Queue()
+        self.queue = queue.Queue()
         self.thread = th.Thread(
             target=optimizeProcess,
             args=(
                 self.queue,
                 self.curveData,
-                self.testRows,
+                self.processed_test_rows,
                 self.netlistPath,
                 self.netlistObject,
                 self.selectedParameters,
                 self.optimizationTolerances,
                 self.RLCBounds,
             ),
-            daemon=True,
         )
+        self.thread.daemon = True
         self.thread.start()
 
     def _update_target_plot(self) -> None:
@@ -555,13 +671,7 @@ class OptimizationSummary(tk.Frame):
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=0.1)
         self.thread = None
-        if self.queue is not None:
-            try:
-                self.queue.close()
-            except Exception:
-                pass
-            finally:
-                self.queue = None
+        self.queue = None
         self.optimization_active = False
 
     def return_to_settings(self) -> None:
@@ -577,60 +687,64 @@ class OptimizationSummary(tk.Frame):
     def update_ui(self) -> None:
         try:
             if self.queue:
-                # Process ALL messages in queue every 100ms
                 messages_processed = 0
-                while not self.queue.empty():
+                drained_queue = True
+                while messages_processed < self._message_batch_limit:
                     try:
                         msg_type, msg_value = self.queue.get_nowait()
-                        messages_processed += 1
-                        
-                        if msg_type == "Update":
-                            self._add_log_entry(msg_value, "INFO")
-                            # Extract run count from update messages
-                            if "total runs completed:" in msg_value:
-                                try:
-                                    run_count = int(msg_value.split(":")[-1].strip())
-                                    self.run_count_label.config(text=f"Runs: {run_count}")
-                                except:
-                                    pass
-                        elif msg_type == "Log":
-                            # Direct log messages from backend
-                            self._add_log_entry(msg_value, "INFO")
-                        elif msg_type == "Done":
-                            self._add_log_entry(msg_value, "SUCCESS")
-                            self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
-                            self.optimization_active = False
-                            # Show restart button, hide modify settings button
-                            self.back_to_settings_button.pack_forget()
-                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
-                        elif msg_type == "Failed":
-                            self._add_log_entry(f"Optimization Failed: {msg_value}", "ERROR")
-                            self.status_label.config(text="Optimization Failed", fg=self.COLORS['error'])
-                            self.optimization_active = False
-                            # Show restart button, hide modify settings button
-                            self.back_to_settings_button.pack_forget()
-                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
-                        elif msg_type == "UpdateNetlist":
-                            self.controller.update_app_data("netlist_object", msg_value)
-                            self._add_log_entry("Netlist updated", "INFO")
-                        elif msg_type == "UpdateOptimizationResults":
-                            self.controller.update_app_data("optimization_results", msg_value)
-                            self._show_results_state(msg_value)
-                            self._add_log_entry("Optimization results updated", "SUCCESS")
-                        elif msg_type == "UpdateYData":
-                            self.update_graph(msg_value)
-                        else:
-                            # Handle unknown message types
-                            self._add_log_entry(f"Unknown message type: {msg_type} - {msg_value}", "WARNING")
-                            
+                    except queue.Empty:
+                        drained_queue = True
+                        break
                     except Exception as msg_error:
                         self._add_log_entry(f"Error processing message: {msg_error}", "ERROR")
                         continue
-                
-                # Log batch processing info if we processed multiple messages
+
+                    drained_queue = False
+                    messages_processed += 1
+
+                    if msg_type == "Update":
+                        if "total runs completed:" in msg_value:
+                            try:
+                                run_count = int(msg_value.split(":")[-1].strip())
+                                self.run_count_label.config(text=f"Runs: {run_count}")
+                            except Exception:
+                                pass
+                        else:
+                            self._add_log_entry(msg_value, "INFO")
+                    elif msg_type == "Log":
+                        continue
+                    elif msg_type == "Done":
+                        self._add_log_entry(msg_value, "SUCCESS")
+                        self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
+                        self.optimization_active = False
+                        self.back_to_settings_button.pack_forget()
+                        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                    elif msg_type == "Failed":
+                        self._add_log_entry(f"Optimization Failed: {msg_value}", "ERROR")
+                        self.status_label.config(text="Optimization Failed", fg=self.COLORS['error'])
+                        self.optimization_active = False
+                        self.back_to_settings_button.pack_forget()
+                        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                    elif msg_type == "UpdateNetlist":
+                        self.controller.update_app_data("netlist_object", msg_value)
+                        self._add_log_entry("Netlist updated", "INFO")
+                    elif msg_type == "UpdateOptimizationResults":
+                        self.controller.update_app_data("optimization_results", msg_value)
+                        self._show_results_state(msg_value)
+                        self._add_log_entry("Optimization results updated", "SUCCESS")
+                    elif msg_type == "UpdateYData":
+                        self.update_graph(msg_value)
+                    else:
+                        self._add_log_entry(f"Unknown message type: {msg_type} - {msg_value}", "WARNING")
+
                 if messages_processed > 1:
                     self._add_log_entry(f"Processed {messages_processed} messages in this update cycle", "DEBUG")
-                    
+
+                self.parent.update_idletasks()
+                if not drained_queue:
+                    self.parent.after(10, self.update_ui)
+                    return
+
         except Exception as e:
             print("UI Update Error:", e)
             self._add_log_entry(f"UI Update Error: {e}", "ERROR")
@@ -643,28 +757,58 @@ class OptimizationSummary(tk.Frame):
 
 
     def update_graph(self, xy_data) -> None:
+        self._graph_update_counter += 1
         data = tuple(xy_data)
-        y_data = list(data[1])
-        x_data = list(data[0])
-        self.line.set_data(x_data, y_data)
-        self.ax.relim()
-        self.ax.autoscale_view()
-        if y_data:
-            lower = min(self.minBound, min(y_data) - 1)
-            upper = max(self.maxBound, max(y_data) + 1)
+        if len(data) == 4:
+            analysis_mode, response_mode, x_raw, y_raw = data
+            x_data = list(x_raw)
+            y_data = list(y_raw)
+            if analysis_mode:
+                self.analysis_type = analysis_mode
+            if response_mode:
+                self.ac_response = response_mode
         else:
-            lower = self.minBound
-            upper = self.maxBound
-        self.ax.set_ylim(lower, upper)
-        
+            analysis_mode = self.analysis_type
+            response_mode = getattr(self, "ac_response", "magnitude")
+            y_data = list(data[1])
+            x_data = list(data[0])
+            if analysis_mode == "ac" and response_mode == "magnitude_db":
+                y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
+
+        self._latest_simulation = (list(x_data), list(y_data))
+        if self._graph_update_counter % 5 == 0 or not self.optimization_active:
+            self.line.set_data(x_data, y_data)
+            self.ax.relim()
+            self.ax.autoscale_view()
+            if y_data:
+                lower = min(self.minBound, min(y_data) - 1)
+                upper = max(self.maxBound, max(y_data) + 1)
+            else:
+                lower = self.minBound
+                upper = self.maxBound
+            self.ax.set_ylim(lower, upper)
+            self.canvas.draw_idle()
+            self._update_error_label()
+
         # Update plot styling
         self.ax.tick_params(colors=self.COLORS['text_secondary'])
         self.ax.spines['bottom'].set_color(self.COLORS['border'])
         self.ax.spines['top'].set_color(self.COLORS['border'])
         self.ax.spines['right'].set_color(self.COLORS['border'])
         self.ax.spines['left'].set_color(self.COLORS['border'])
+        if self.analysis_type == "ac":
+            try:
+                self.ax.set_xscale("log")
+            except ValueError:
+                pass
         
         self.canvas.draw()
 
     def close_window(self) -> None:
+        try:
+            if getattr(self, "convergence_window", None):
+                self.convergence_window.destroy()
+                self.convergence_window = None
+        except Exception:
+            pass
         self.parent.quit()

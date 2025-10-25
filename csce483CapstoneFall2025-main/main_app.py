@@ -13,8 +13,10 @@ import os
 #      pass
 
 # Import the main function from your actual entry point
+import multiprocessing as mp
 from frontend.main import main
 
 if __name__ == "__main__":
     # Call the imported main function from frontend/main.py
+    mp.freeze_support()
     main()

@@ -26,7 +26,15 @@ class AppController:
             "nodes": set(),
             "optimization_results": [],
             "netlist_object": None,
-            "generated_data": []
+            "generated_data": [],
+            "analysis_type": "transient",
+            "ac_settings": {
+                "sweep_type": "DEC",
+                "points": 10,
+                "start_frequency": 1.0,
+                "stop_frequency": 1e6,
+                "response": "magnitude",
+            },
         }
         self.show_netlist_uploader()  # Start with the first window
 
