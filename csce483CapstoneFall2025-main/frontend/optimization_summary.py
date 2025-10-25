@@ -629,7 +629,6 @@ class OptimizationSummary(tk.Frame):
         self._graph_update_counter = 0
         self.optimization_active = True
         self._reset_status_view()
-        self._graph_update_counter = 0
         self.queue = queue.Queue()
         self.thread = th.Thread(
             target=optimizeProcess,
