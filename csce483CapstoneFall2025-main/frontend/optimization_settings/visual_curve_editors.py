@@ -7,12 +7,13 @@ from matplotlib.figure import Figure
 # ------------------------
 # LINE editor (two points)
 # ------------------------
-def open_line_editor(owner, m, b, x0, x1, on_change):
+def open_line_editor(owner, m, b, x0, x1, on_change, on_apply=None):
     """Open a draggable 2-point line editor.
     Args:
         owner: parent Tk widget
         m, b, x0, x1: floats (initial slope, intercept, range)
         on_change: callback(m, b, x0, x1) called on drag/release/apply
+        on_apply: optional callback called when Apply is clicked (for auto-adding line)
     """
     if x1 <= x0:
         x1 = x0 + 1.0
@@ -126,6 +127,11 @@ def open_line_editor(owner, m, b, x0, x1, on_change):
         # rescale when Apply is clicked:
         _set_limits_line(x0, m * x0 + b, x1, m * x1 + b)
         _redraw_and_emit(m, b, x0, x1)
+        # Call on_apply callback if provided (for auto-adding line)
+        if on_apply:
+            on_apply(m, b, x0, x1)
+        # Close the visual editor window after applying
+        win.destroy()
 
     fig.canvas.mpl_connect("button_press_event", on_press)
     fig.canvas.mpl_connect("motion_notify_event", on_motion)
@@ -138,7 +144,7 @@ def open_line_editor(owner, m, b, x0, x1, on_change):
 # ------------------------
 # HEAVISIDE editor
 # ------------------------
-def open_heaviside_editor(owner, amp, t0, x1, on_change):
+def open_heaviside_editor(owner, amp, t0, x1, on_change, on_apply=None):
     """Open a heaviside step editor."""
     if x1 <= t0:
         x1 = t0 + 1.0
@@ -226,6 +232,11 @@ def open_heaviside_editor(owner, amp, t0, x1, on_change):
         # rescale when Apply is clicked:
         _set_limits_step(amp, t0, x1)
         _redraw_emit(amp, t0, x1)
+        # Call on_apply callback if provided (for auto-adding step)
+        if on_apply:
+            on_apply(amp, t0, x1)
+        # Close the visual editor window after applying
+        win.destroy()
 
     fig.canvas.mpl_connect("button_press_event", on_press)
     fig.canvas.mpl_connect("motion_notify_event", on_motion)

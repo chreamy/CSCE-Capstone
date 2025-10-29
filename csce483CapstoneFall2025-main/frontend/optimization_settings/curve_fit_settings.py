@@ -141,12 +141,46 @@ class CurveFitSettings(tk.Frame):
                     line_intercept.delete(0, tk.END), line_intercept.insert(0, str(b)),
                     line_start_x.delete(0, tk.END), line_start_x.insert(0, str(x0)),
                     line_end_x.delete(0, tk.END),   line_end_x.insert(0,   str(x1))
-                )
+                ),
+                on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1)
             )
         ).pack(side=tk.LEFT, padx=6)
 
         self.custom_functions = []
         return line_frame
+
+    def _add_line_from_visual_editor(self, slope, y_int, x_start, x_end):
+        """Helper method to add a line function from visual editor parameters"""
+        # Create mock entry objects that return the values
+        class MockEntry:
+            def __init__(self, value):
+                self.value = str(value)
+            def get(self):
+                return self.value
+        
+        slope_entry = MockEntry(slope)
+        y_int_entry = MockEntry(y_int)
+        x_start_entry = MockEntry(x_start)
+        x_end_entry = MockEntry(x_end)
+        
+        # Call the existing add_function method
+        self.add_function(input_type.LINE, slope_entry, y_int_entry, x_start_entry, x_end_entry)
+
+    def _add_heaviside_from_visual_editor(self, amplitude, t0, x1):
+        """Helper method to add a heaviside function from visual editor parameters"""
+        # Create mock entry objects that return the values
+        class MockEntry:
+            def __init__(self, value):
+                self.value = str(value)
+            def get(self):
+                return self.value
+        
+        amplitude_entry = MockEntry(amplitude)
+        t0_entry = MockEntry(t0)
+        x1_entry = MockEntry(x1)
+        
+        # Call the existing add_function method
+        self.add_function(input_type.HEAVISIDE, amplitude_entry, t0_entry, x1_entry, "")
 
     def create_heaviside_frame(self):
         heaviside_frame = tk.Frame(self.select_input_type_frame)
@@ -172,7 +206,8 @@ class CurveFitSettings(tk.Frame):
                     heaviside_amplitude.delete(0, tk.END), heaviside_amplitude.insert(0, str(a)),
                     heaviside_start_x.delete(0, tk.END),   heaviside_start_x.insert(0, str(t0)),
                     heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0,   str(x1))
-                )
+                ),
+                on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1)
             )
         ).pack(side=tk.LEFT, padx=6)
 
