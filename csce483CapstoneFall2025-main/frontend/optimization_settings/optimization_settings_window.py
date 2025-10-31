@@ -123,10 +123,6 @@ class OptimizationSettingsWindow(tk.Frame):
         scrollable_frame = ttk.Frame(canvas, style="TFrame")
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
-        def _on_configure(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            canvas.itemconfig(canvas_window, width=event.width)
-
         def _on_frame_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
 
