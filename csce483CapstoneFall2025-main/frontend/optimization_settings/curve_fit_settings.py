@@ -4,9 +4,10 @@ from .visual_curve_editors import open_line_editor, open_heaviside_editor, open_
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import numpy as np
 import csv
+import re
 from enum import Enum
 
 
@@ -69,15 +70,22 @@ class CurveFitSettings(tk.Frame):
         ttk.Button(btns, text="Delete Selected", command=self.delete_selected_function).pack(fill=tk.X, pady=2)
 
         self.func_model = []  # list of {"type": "...", "params": (...)}
+        self.analysis_type = "transient"
+        self.ac_response = "magnitude"
+        self.ac_response_options = {
+            "magnitude": "Magnitude",
+            "magnitude_db": "Magnitude (dB)",
+            "phase": "Phase",
+        }
 
         # --- X and Y Parameter Dropdowns and Expressions ---
-        x_param_label = ttk.Label(self, text="X Parameter: TIME , ")
-        x_param_label.pack(side=tk.LEFT)
         self.x_parameter_var = tk.StringVar(value="TIME")
+        self.x_param_label = ttk.Label(self, text="X Parameter: TIME")
+        self.x_param_label.pack(side=tk.LEFT)
 
-        y_param_label = ttk.Label(self, text="Y Parameter:")
-        y_param_label.pack(side=tk.LEFT)
         self.y_parameter_var = tk.StringVar()
+        self.y_param_label = ttk.Label(self, text="Y Parameter:")
+        self.y_param_label.pack(side=tk.LEFT)
 
         y_param_frame = ttk.Frame(self)
         y_param_frame.pack(side=tk.LEFT)
@@ -89,16 +97,40 @@ class CurveFitSettings(tk.Frame):
         )
         self.y_parameter_dropdown.pack(side=tk.LEFT, padx=5)
         self.y_parameter_dropdown.bind("<<ComboboxSelected>>", self.on_y_parameter_selected)
+
+        self.ac_response_var = tk.StringVar(value=self.ac_response_options[self.ac_response])
+        self.ac_response_frame = ttk.Frame(self)
+        self.ac_response_label = ttk.Label(self.ac_response_frame, text="AC Response:")
+        self.ac_response_label.pack(side=tk.LEFT, padx=(10, 0))
+        self.ac_response_dropdown = ttk.Combobox(
+            self.ac_response_frame,
+            textvariable=self.ac_response_var,
+            values=list(self.ac_response_options.values()),
+            state="readonly",
+            width=18,
+        )
+        self.ac_response_dropdown.pack(side=tk.LEFT, padx=5)
+        self.ac_response_dropdown.bind("<<ComboboxSelected>>", self.on_ac_response_selected)
+        self.ac_response_frame.pack(side=tk.LEFT)
+        self.ac_response_frame.pack_forget()
     
     def custom_x_inputs_are_valid(self, x_start, x_end) -> bool:
-        if (x_start < 0):
-            messagebox.showerror("Input Error", "The starting x value may NOT be less than 0.")
-            return False
-        if (x_end < 0):
-            messagebox.showerror("Input Error", "The ending x value may NOT be less than 0.")
-            return False
-        if (x_start >= x_end):
-            messagebox.showerror("Input Error", "The starting x value may NOT be greater than the ending x value.")
+        if self.analysis_type == "ac":
+            if x_start <= 0:
+                messagebox.showerror("Input Error", "The starting frequency must be greater than 0.")
+                return False
+            if x_end <= 0:
+                messagebox.showerror("Input Error", "The ending frequency must be greater than 0.")
+                return False
+        else:
+            if x_start < 0:
+                messagebox.showerror("Input Error", "The starting x value may NOT be less than 0.")
+                return False
+            if x_end < 0:
+                messagebox.showerror("Input Error", "The ending x value may NOT be less than 0.")
+                return False
+        if x_start >= x_end:
+            messagebox.showerror("Input Error", "The starting value must be less than the ending value.")
             return False
         return True
 
@@ -143,12 +175,46 @@ class CurveFitSettings(tk.Frame):
                     line_intercept.delete(0, tk.END), line_intercept.insert(0, str(b)),
                     line_start_x.delete(0, tk.END), line_start_x.insert(0, str(x0)),
                     line_end_x.delete(0, tk.END),   line_end_x.insert(0,   str(x1))
-                )
+                ),
+                on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1)
             )
         ).pack(side=tk.LEFT, padx=6)
 
         self.custom_functions = []
         return line_frame
+
+    def _add_line_from_visual_editor(self, slope, y_int, x_start, x_end):
+        """Helper method to add a line function from visual editor parameters"""
+        # Create mock entry objects that return the values
+        class MockEntry:
+            def __init__(self, value):
+                self.value = str(value)
+            def get(self):
+                return self.value
+        
+        slope_entry = MockEntry(slope)
+        y_int_entry = MockEntry(y_int)
+        x_start_entry = MockEntry(x_start)
+        x_end_entry = MockEntry(x_end)
+        
+        # Call the existing add_function method
+        self.add_function(input_type.LINE, slope_entry, y_int_entry, x_start_entry, x_end_entry)
+
+    def _add_heaviside_from_visual_editor(self, amplitude, t0, x1):
+        """Helper method to add a heaviside function from visual editor parameters"""
+        # Create mock entry objects that return the values
+        class MockEntry:
+            def __init__(self, value):
+                self.value = str(value)
+            def get(self):
+                return self.value
+        
+        amplitude_entry = MockEntry(amplitude)
+        t0_entry = MockEntry(t0)
+        x1_entry = MockEntry(x1)
+        
+        # Call the existing add_function method
+        self.add_function(input_type.HEAVISIDE, amplitude_entry, t0_entry, x1_entry, "")
 
     def create_heaviside_frame(self):
         heaviside_frame = tk.Frame(self.select_input_type_frame)
@@ -174,7 +240,8 @@ class CurveFitSettings(tk.Frame):
                     heaviside_amplitude.delete(0, tk.END), heaviside_amplitude.insert(0, str(a)),
                     heaviside_start_x.delete(0, tk.END),   heaviside_start_x.insert(0, str(t0)),
                     heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0,   str(x1))
-                )
+                ),
+                on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1)
             )
         ).pack(side=tk.LEFT, padx=6)
 
@@ -472,8 +539,97 @@ class CurveFitSettings(tk.Frame):
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("y_param_dropdown_selected", True)
 
+    def on_ac_response_selected(self, event=None):
+        selected_label = self.ac_response_var.get()
+        for value, label in self.ac_response_options.items():
+            if label == selected_label:
+                self.ac_response = value
+                break
+        self._update_ac_response_labels()
+        if self.inputs_completed_callback:
+            self.inputs_completed_callback("ac_response_changed", self.ac_response)
+
+    def set_analysis_context(self, analysis_type: str, ac_response: Optional[str] = None) -> None:
+        self.analysis_type = (analysis_type or "transient").lower()
+        if ac_response:
+            candidate = ac_response.lower()
+            if candidate in {"magnitude", "magnitude_db", "phase", "real", "imag"}:
+                self.ac_response = candidate
+            else:
+                self.ac_response = "magnitude"
+        else:
+            self.ac_response = "magnitude"
+        if self.analysis_type == "ac":
+            self.x_parameter_var.set("FREQ")
+            self.x_param_label.config(text="X Parameter: FREQ")
+            self.ac_response_var.set(self.ac_response_options.get(self.ac_response, "Magnitude"))
+            self.ac_response_frame.pack(side=tk.LEFT)
+            self._update_ac_response_labels()
+        else:
+            self.x_parameter_var.set("TIME")
+            self.x_param_label.config(text="X Parameter: TIME")
+            self.y_param_label.config(text="Y Parameter:")
+            self.ac_response_frame.pack_forget()
+
+    def _format_y_parameter_for_analysis(self, value: str) -> str:
+        if not value:
+            return value
+        token = value.strip()
+        if self.analysis_type == "ac":
+            lowered = token.lower()
+            if lowered.startswith(("vm(", "vp(", "vr(", "vi(")):
+                return token.upper()
+            match = re.match(r"v\s*\((.+)\)", token, flags=re.IGNORECASE)
+            if match:
+                inner = match.group(1).strip().upper()
+                prefix = "VM"
+                if self.ac_response == "phase":
+                    prefix = "VP"
+                elif self.ac_response == "real":
+                    prefix = "VR"
+                elif self.ac_response == "imag":
+                    prefix = "VI"
+                # For magnitude_db we still request VM and convert later
+                return f"{prefix}({inner})"
+        return token.upper()
+
     def get_settings(self) -> Dict[str, Any]:
+        y_display = self.y_parameter_var.get()
         settings = {"curve_file": self.curve_file_path_var.get()}
         settings["x_parameter"] = self.x_parameter_var.get()
-        settings["y_parameter"] = self.y_parameter_var.get()
+        settings["x_parameter_display"] = (
+            "Frequency (Hz)" if self.analysis_type == "ac" else "Time (s)"
+        )
+        if self.analysis_type == "ac":
+            if self.ac_response == "magnitude_db":
+                unit_label = "Magnitude (dB)"
+            elif self.ac_response == "phase":
+                unit_label = "Phase (degrees)"
+            elif self.ac_response == "real":
+                unit_label = "Real Component"
+            elif self.ac_response == "imag":
+                unit_label = "Imaginary Component"
+            else:
+                unit_label = "Magnitude"
+            if y_display:
+                y_display_label = f"{y_display} {unit_label}"
+            else:
+                y_display_label = unit_label
+            y_units = unit_label
+        else:
+            y_display_label = y_display or "Voltage"
+            y_units = y_display or "Voltage"
+        settings["y_parameter_display"] = y_display_label
+        settings["y_parameter_expression"] = y_display
+        settings["y_units"] = y_units
+        settings["y_parameter"] = self._format_y_parameter_for_analysis(y_display)
+        settings["ac_response"] = self.ac_response
         return settings
+
+    def _update_ac_response_labels(self) -> None:
+        if self.ac_response == "magnitude_db":
+            self.y_param_label.config(text="Y Parameter (Magnitude dB):")
+        elif self.ac_response == "phase":
+            self.y_param_label.config(text="Y Parameter (Phase degrees):")
+        else:
+            self.y_param_label.config(text="Y Parameter (Magnitude):")

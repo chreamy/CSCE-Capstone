@@ -1,0 +1,11 @@
+* Low-pass RC test circuit
+* Input: AC 1 V source
+* Nodes: in (input), out (output), 0 (ground)
+
+VIN in 0 AC 1
+R1 in out 1k
+C1 out 0 1u
+
+.AC DEC 20 10 1e5
+.PRINT AC VM(out)
+.END

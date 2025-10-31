@@ -1,7 +1,9 @@
 
+import os
 import shutil
+import re
 import numpy as np
-from backend.curvefit_optimization import curvefit_optimize
+from backend.curvefit_optimization import curvefit_optimize, get_current_session_number
 
 def add_part_constraints(constraints, netlist):
     equalConstraints = []
@@ -37,89 +39,260 @@ def add_part_constraints(constraints, netlist):
                             print(f"{component.name} maxVal set to {component.maxVal}")
                     break
     return equalConstraints
-    
 
-def add_node_constraints(constraints):
-    formattedNodeConstraints = {}
-    nodes = {}
-    for constraint in constraints:
-        if constraint["type"] == "node":
-            nodes[constraint["left"].strip()] = [None,None]
-    for constraint in constraints:
-        if constraint["type"] == "node":
-            match constraint["operator"]:
-                        case ">=":
-                            nodes[constraint["left"].strip()][0] = float(constraint["right"].strip())
-                        case "<=":
-                            nodes[constraint["left"].strip()][1] = float(constraint["right"].strip())
-    for node in nodes:
-        formattedNodeConstraints[node] = (nodes[node][0],nodes[node][1])
-    return formattedNodeConstraints
 
-def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedParameters,optimizationTolerances,RLCBounds):
-    try:        
-        TARGET_VALUE = curveData["y_parameter"]
-        TEST_ROWS = testRows
+def normalize_observable_for_analysis(observable, analysis_type="transient", ac_response="magnitude"):
+    if observable is None:
+        return ""
+    token = str(observable).strip()
+    if not token:
+        return ""
+
+    analysis = (analysis_type or "transient").strip().lower()
+    response = (ac_response or "magnitude").strip().lower()
+
+    if analysis != "ac":
+        return token.upper()
+
+    lowered = token.lower()
+    if lowered.startswith(("vm(", "vp(", "vr(", "vi(")):
+        return token.upper()
+
+    match = re.match(r"v\s*\((.+)\)", token, flags=re.IGNORECASE)
+    if match:
+        inner = match.group(1).strip()
+        prefix_map = {
+            "magnitude": "VM",
+            "mag": "VM",
+            "db": "VM",
+            "magnitude_db": "VM",
+            "phase": "VP",
+            "angle": "VP",
+            "real": "VR",
+            "imag": "VI",
+        }
+        prefix = prefix_map.get(response, "VM")
+        return f"{prefix}({inner.upper()})"
+    return token.upper()
+
+
+def add_node_constraints(constraints, analysis_type="transient", ac_response="magnitude"):
+    formatted_constraints = {}
+    for constraint in constraints:
+        if constraint.get("type") != "node":
+            continue
+
+        key = normalize_observable_for_analysis(constraint.get("left", ""), analysis_type, ac_response)
+        if not key:
+            continue
+
+        try:
+            value = float(str(constraint.get("right", "")).strip())
+        except (TypeError, ValueError):
+            continue
+
+        operator = (constraint.get("operator") or "").strip()
+        lower, upper = formatted_constraints.get(key, (None, None))
+
+        if operator == ">=":
+            lower = value if lower is None else max(lower, value)
+        elif operator == "<=":
+            upper = value if upper is None else min(upper, value)
+        formatted_constraints[key] = (lower, upper)
+
+    return formatted_constraints
+
+def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds):
+    original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
+    try:
+        constraints = (curveData or {}).get("constraints", [])
+        target_expression = (curveData or {}).get("y_parameter_expression") or (curveData or {}).get("y_parameter", "")
+        target_display = target_expression
+        TEST_ROWS = testRows or []
         ORIG_NETLIST_PATH = netlistPath
         NETLIST = netlistObject
-        WRITABLE_NETLIST_PATH = ORIG_NETLIST_PATH[:-4]+"Copy.txt"
-        NODE_CONSTRAINTS = add_node_constraints(curveData["constraints"]) 
+        selectedParameters = selectedParameters or []
+        RLCBounds = RLCBounds or [False, False, False]
 
-        print(f"TARGET_VALUE = {TARGET_VALUE}")
+        analysis_type = ((curveData or {}).get("analysis_type") or "transient").strip().lower()
+        ac_settings = (curveData or {}).get("ac_settings") or {}
+        ac_response_alias = (ac_settings.get("response") if isinstance(ac_settings, dict) else None) or "magnitude"
+        ac_response_alias = ac_response_alias.strip().lower()
+        response_aliases = {
+            "mag": "magnitude",
+            "vm": "magnitude",
+            "magnitude": "magnitude",
+            "db": "magnitude_db",
+            "magnitude_db": "magnitude_db",
+            "phase": "phase",
+            "angle": "phase",
+            "real": "real",
+            "imag": "imag",
+        }
+        ac_response = response_aliases.get(ac_response_alias, "magnitude")
+        if ac_response not in {"magnitude", "phase", "real", "imag", "magnitude_db"}:
+            ac_response = "magnitude"
+
+        y_units = (curveData or {}).get("y_units", "")
+        if analysis_type == "ac":
+            units_lower = str(y_units).lower()
+            if "db" in units_lower:
+                ac_response = "magnitude_db"
+                if isinstance(ac_settings, dict):
+                    ac_settings["response"] = "magnitude_db"
+            elif "phase" in units_lower:
+                ac_response = "phase"
+                if isinstance(ac_settings, dict):
+                    ac_settings["response"] = "phase"
+
+        if analysis_type == "ac" and ac_response == "magnitude_db":
+            converted_rows = []
+            for row in TEST_ROWS:
+                try:
+                    x_val = float(row[0])
+                    y_val = float(row[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if y_val <= 0:
+                    y_val = 1e-30
+                converted_rows.append([x_val, 20.0 * np.log10(y_val)])
+            TEST_ROWS = converted_rows
+
+        normalized_target = normalize_observable_for_analysis(target_display, analysis_type, ac_response)
+        x_parameter = (curveData or {}).get("x_parameter")
+        if not x_parameter:
+            x_parameter = "FREQ" if analysis_type == "ac" else "TIME"
+        x_parameter = str(x_parameter).strip().upper()
+
+        session_num = get_current_session_number()
+        session_dir = os.path.join("runs", str(session_num))
+        if not os.path.exists(session_dir):
+            os.makedirs(session_dir)
+        WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
+
+        NODE_CONSTRAINTS = add_node_constraints(constraints, analysis_type, ac_response)
+
+        print(f"TARGET_VALUE (display) = {target_display}")
+        print(f"TARGET_VALUE (normalized) = {normalized_target}")
         print(f"ORIG_NETLIST_PATH = {ORIG_NETLIST_PATH}")
         print(f"NETLIST.file_path = {NETLIST.file_path}")
         print(f"WRIITABLE_NETLIST_PATH = {WRITABLE_NETLIST_PATH}")
+        print(f"Analysis type = {analysis_type}")
+        print(f"Node constraints (normalized) = {NODE_CONSTRAINTS}")
 
-        #UPDATE NETLIST BASED ON OPTIMIZATION SETTINGS AND CONSTRAINTS
         for component in NETLIST.components:
             if component.name in selectedParameters:
                 component.variable = True
 
-        #ADD IN INITIAL CONSTRAINTS TO NETLIST CLASS VIA MINVAL MAXVAL
-        EQUALITY_PART_CONSTRAINTS = add_part_constraints(curveData["constraints"], NETLIST)
+        EQUALITY_PART_CONSTRAINTS = add_part_constraints(constraints, NETLIST)
 
-        #ADD DEFAULT BOUNDS IF USER WANTS THEM FOR COMPONENT TYPE AND THEY HAVEN'T BEEN SPECIFIED BY OTHER CONSTRAINT
         for component in NETLIST.components:
             match component.type:
                 case "R":
-                    if (RLCBounds[0]):
+                    if RLCBounds[0]:
                         if component.minVal == -1:
-                            component.minVal = component.value/10
+                            component.minVal = component.value / 10
                         if component.maxVal == np.inf:
-                            component.maxVal = component.value*10
+                            component.maxVal = component.value * 10
                 case "L":
-                    if (RLCBounds[1]):
+                    if RLCBounds[1]:
                         if component.minVal == -1:
-                            component.minVal = component.value/10
+                            component.minVal = component.value / 10
                         if component.maxVal == np.inf:
-                            component.maxVal = component.value*10
+                            component.maxVal = component.value * 10
                 case "C":
-                    if (RLCBounds[2]):
+                    if RLCBounds[2]:
                         if component.minVal == -1:
-                            component.minVal = component.value/10
+                            component.minVal = component.value / 10
                         if component.maxVal == np.inf:
-                            component.maxVal = component.value*10
-            #If min is still -1 after match statement (Case where no bound specified in a constraint and default bounds not desired by user) set to 0.
+                            component.maxVal = component.value * 10
             if component.minVal == -1:
                 component.minVal = 0
 
-        endValue = max([sublist[0] for sublist in TEST_ROWS])
-        initValue = min([sublist[0] for sublist in TEST_ROWS])
-        shutil.copyfile(NETLIST.file_path, WRITABLE_NETLIST_PATH)
-        NETLIST.class_to_file(WRITABLE_NETLIST_PATH)
-        CONSTRAINED_NODES = []
-        for constraint in curveData["constraints"]:
-            if constraint["type"] == "node":
-                if constraint["left"].strip() != TARGET_VALUE:
-                    CONSTRAINED_NODES.append(constraint["left"].strip())
-        NETLIST.writeTranCmdsToFile(WRITABLE_NETLIST_PATH,(endValue- initValue)/ 100,endValue,initValue,(endValue- initValue)/ 100,TARGET_VALUE,CONSTRAINED_NODES)
-        #Optimization Call
-        optim = curvefit_optimize(TARGET_VALUE, TEST_ROWS, NETLIST, WRITABLE_NETLIST_PATH, NODE_CONSTRAINTS, EQUALITY_PART_CONSTRAINTS,queue,optimizationTolerances[0],optimizationTolerances[1],optimizationTolerances[2])
+        if TEST_ROWS:
+            xs = [row[0] for row in TEST_ROWS]
+            endValue = max(xs)
+            initValue = min(xs)
+        else:
+            endValue = 0.0
+            initValue = 0.0
 
-        #Update AppData
-        queue.put(("UpdateNetlist",NETLIST))
-        queue.put(("UpdateOptimizationResults",optim))
-        
+        source_netlist_path = ORIG_NETLIST_PATH
+        if not os.path.exists(source_netlist_path):
+            source_netlist_path = NETLIST.file_path
+        shutil.copyfile(source_netlist_path, WRITABLE_NETLIST_PATH)
+        NETLIST.file_path = ORIG_NETLIST_PATH
+        NETLIST.class_to_file(WRITABLE_NETLIST_PATH)
+
+        print_variables = []
+        if normalized_target:
+            print_variables.append(normalized_target)
+        for node_name in NODE_CONSTRAINTS.keys():
+            if node_name not in print_variables:
+                print_variables.append(node_name)
+
+        if analysis_type == "ac":
+            sweep = ac_settings.get("sweep_type") or ac_settings.get("sweep") or "DEC"
+            points = ac_settings.get("points") or ac_settings.get("points_per_decade") or ac_settings.get("points_per_interval")
+            if points is None:
+                points = 10
+            start_frequency = ac_settings.get("start_frequency", ac_settings.get("start_freq"))
+            stop_frequency = ac_settings.get("stop_frequency", ac_settings.get("stop_freq"))
+
+            default_start = max(initValue, 1e-12) if TEST_ROWS else 1e-12
+            if start_frequency is None or start_frequency <= 0:
+                start_frequency = default_start
+            if stop_frequency is None or stop_frequency <= start_frequency:
+                default_stop = max(endValue, start_frequency * 10)
+                if default_stop <= start_frequency:
+                    default_stop = start_frequency * 10
+                stop_frequency = default_stop
+
+            NETLIST.writeAcCmdsToFile(
+                WRITABLE_NETLIST_PATH,
+                sweep,
+                points,
+                start_frequency,
+                stop_frequency,
+                print_variables,
+            )
+        else:
+            span = endValue - initValue
+            if span == 0:
+                step_guess = max(abs(endValue), 1e-9) / 100 if endValue else 1e-9
+            else:
+                step_guess = abs(span) / 100
+            constrained_nodes = [node for node in print_variables if node != normalized_target]
+            NETLIST.writeTranCmdsToFile(
+                WRITABLE_NETLIST_PATH,
+                step_guess,
+                endValue,
+                initValue,
+                step_guess,
+                normalized_target,
+                constrained_nodes,
+            )
+
+        optim = curvefit_optimize(
+            normalized_target,
+            TEST_ROWS,
+            NETLIST,
+            WRITABLE_NETLIST_PATH,
+            NODE_CONSTRAINTS,
+            EQUALITY_PART_CONSTRAINTS,
+            queue,
+            optimizationTolerances[0],
+            optimizationTolerances[1],
+            optimizationTolerances[2],
+            analysis_type=analysis_type,
+            x_parameter=x_parameter,
+            ac_response=ac_response,
+        )
+
+        NETLIST.file_path = ORIG_NETLIST_PATH
+        queue.put(("UpdateNetlist", NETLIST))
+        queue.put(("UpdateOptimizationResults", optim))
+
         print(f"Optimization Results: {optim}")
         queue.put(("Update", "Optimization Complete!"))
         queue.put(("Update", f"Optimality: {optim[4]}"))
@@ -127,6 +300,20 @@ def optimizeProcess(queue,curveData,testRows,netlistPath,netlistObject,selectedP
         queue.put(("Update", f"Initial Cost: {optim[2]}"))
         queue.put(("Update", f"Least Squares Iterations: {optim[1]}"))
         queue.put(("Update", f"Total Xyce Runs: {optim[0]}"))
-        queue.put(("Done", f"Optimization Results:"))
+        queue.put(("Done", "Optimization Results:"))
     except Exception as e:
-        queue.put(("Failed",f"{e}"))
+        # Even if optimization fails, try to get partial results and log them
+        print(f"Optimization failed with error: {e}")
+        queue.put(("Failed", f"Optimization failed: {e}"))
+        
+        # Try to get partial results if available
+        try:
+            # The curvefit_optimize function should have logged the last 3 runs even on failure
+            # We can still try to update the netlist with whatever values were set
+            NETLIST.file_path = ORIG_NETLIST_PATH
+            queue.put(("UpdateNetlist", NETLIST))
+            queue.put(("Update", f"Optimization failed but partial results may be available in session log"))
+        except:
+            pass  # If even this fails, just continue
+    finally:
+        netlistObject.file_path = original_netlist_path
