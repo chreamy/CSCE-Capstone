@@ -8,6 +8,13 @@ from .constraint_table import ConstraintTable
 from .curve_fit_settings import CurveFitSettings
 from .ac_settings_dialog import AcSettingsDialog
 from ..utils import import_constraints_from_file, export_constraints_to_file
+from ..ui_theme import (
+    COLORS,
+    FONTS,
+    create_primary_button,
+    create_secondary_button,
+    create_card,
+)
 
 
 class OptimizationSettingsWindow(tk.Frame):
@@ -24,7 +31,7 @@ class OptimizationSettingsWindow(tk.Frame):
             return False
 
     def __init__(self, parent: tk.Tk, controller: "AppController"):
-        super().__init__(parent)
+        super().__init__(parent, bg=COLORS["bg_primary"])
         self.controller = controller  # Assign controller first
 
         # --- Get data needed to build the lists ---
@@ -76,39 +83,61 @@ class OptimizationSettingsWindow(tk.Frame):
         self.function_button_pressed = False
         self.y_param_dropdown_selected = False
 
-        # --- Scrollable Canvas Setup ---
-        canvas = tk.Canvas(self, borderwidth=0)
+        # --- Header ---
+        header_card = create_card(self, padding=None)
+        header_card.pack(fill=tk.X, padx=32, pady=(24, 16))
+        header_body = header_card.inner
+        tk.Label(
+            header_body,
+            text="Optimization Settings",
+            font=FONTS["title"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w", padx=24, pady=(18, 4))
+        tk.Label(
+            header_body,
+            text="Review your analysis configuration, adjust curve-fit goals, and manage constraints before running the optimization.",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+            wraplength=720,
+            justify=tk.LEFT,
+        ).pack(anchor="w", padx=24, pady=(0, 18))
+
+        # --- Scrollable Content Area ---
+        content_wrapper = tk.Frame(self, bg=COLORS["bg_primary"])
+        content_wrapper.pack(fill=tk.BOTH, expand=True, padx=32, pady=(0, 32))
+
+        canvas = tk.Canvas(
+            content_wrapper,
+            borderwidth=0,
+            highlightthickness=0,
+            bg=COLORS["bg_primary"],
+        )
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Add vertical scrollbar
-        vsb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        vsb = ttk.Scrollbar(content_wrapper, orient="vertical", command=canvas.yview)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         canvas.configure(yscrollcommand=vsb.set)
 
-        # Create a frame inside the canvas
-        scrollable_frame = ttk.Frame(canvas)
-        scrollable_frame.bind(
+        scrollable_frame = ttk.Frame(canvas, style="TFrame")
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        scrollable_frame.bind("<Configure>", _on_frame_configure)
+        canvas.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda event: canvas.itemconfig(canvas_window, width=event.width),
         )
 
-        # Add the scrollable frame to the canvas window
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        def resize_scrollable_frame(event):
-            canvas.itemconfig(canvas_window, width=event.width)
-
-        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.bind("<Configure>", resize_scrollable_frame)
-
         def _on_mousewheel(event):
-             if canvas.winfo_exists():
+            if canvas.winfo_exists():
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        # For Windows and macOS
         canvas.bind("<Enter>", lambda e: scrollable_frame.bind_all("<MouseWheel>", _on_mousewheel))
         canvas.bind("<Leave>", lambda e: scrollable_frame.unbind_all("<MouseWheel>"))
-        # Now use scrollable_frame instead of main_frame
         main_frame = scrollable_frame
 
         # --- Optimization Type Dropdown ---
@@ -149,7 +178,7 @@ class OptimizationSettingsWindow(tk.Frame):
         analysis_type_dropdown.pack(side=tk.LEFT, anchor=tk.W, padx=(0, 10), pady=5)
         analysis_type_dropdown.bind("<<ComboboxSelected>>", self.on_analysis_type_change)
 
-        self.ac_config_button = ttk.Button(
+        self.ac_config_button = create_secondary_button(
             analysis_type_frame,
             text="Configure AC Sweep...",
             command=self.open_ac_settings,
@@ -209,14 +238,14 @@ class OptimizationSettingsWindow(tk.Frame):
         import_export_frame = ttk.Frame(button_row_frame)
         import_export_frame.pack(side=tk.LEFT)
 
-        import_button = ttk.Button(
+        import_button = create_secondary_button(
             import_export_frame,
             text="Import Constraints",
             command=self.import_constraints,
         )
         import_button.pack(side=tk.LEFT, padx=5)
 
-        export_button = ttk.Button(
+        export_button = create_secondary_button(
             import_export_frame,
             text="Export Constraints",
             command=self.export_constraints,
@@ -227,19 +256,19 @@ class OptimizationSettingsWindow(tk.Frame):
         self.button_frame = ttk.Frame(button_row_frame)
         self.button_frame.pack(side=tk.RIGHT)
 
-        add_constraint_button = ttk.Button(
+        add_constraint_button = create_primary_button(
             self.button_frame,
             text="Add Constraint",
             command=self.open_add_constraint_window,  # type: ignore
         )
         add_constraint_button.pack(side=tk.LEFT, padx=2)
 
-        remove_constraint_button = ttk.Button(
+        remove_constraint_button = create_secondary_button(
             self.button_frame, text="Remove Constraint", command=self.remove_constraint
         )
         remove_constraint_button.pack(side=tk.LEFT, padx=2)
 
-        edit_constraint_button = ttk.Button(
+        edit_constraint_button = create_secondary_button(
             self.button_frame, text="Edit Constraint", command=self.edit_constraint
         )
         edit_constraint_button.pack(side=tk.LEFT, padx=2)
@@ -319,12 +348,13 @@ class OptimizationSettingsWindow(tk.Frame):
         self.ftol_entry.bind("<FocusOut>", lambda e: self.validate_float("ftol_var"))
 
         # --- Navigation Buttons ---
-        navigation_frame = ttk.Frame(main_frame)
+        navigation_frame = tk.Frame(main_frame, bg=COLORS["bg_primary"])
         navigation_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
 
-        back_button = ttk.Button(navigation_frame, text="Back", command=self.go_back)
-        back_button.pack(side=tk.LEFT, padx=5)
-        self.continue_button = ttk.Button(
+        create_secondary_button(
+            navigation_frame, text="Back", command=self.go_back
+        ).pack(side=tk.LEFT, padx=5)
+        self.continue_button = create_primary_button(
             navigation_frame,
             text="Begin Optimization",
             command=self.go_forward,
