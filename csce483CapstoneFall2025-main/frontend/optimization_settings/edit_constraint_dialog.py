@@ -126,12 +126,6 @@ class EditConstraintDialog(tk.Toplevel):
         ttk.Button(button_frame, text="OK", command=self.on_ok).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=self.on_cancel).pack(side=tk.LEFT, padx=5)
 
-    def _parse_float_or_none(self, s: str):
-        s = (s or "").strip()
-        if not s:
-            return None
-        return float(s)
-
         # --- OK and Cancel Buttons ---
         button_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
         button_frame.grid(row=1, column=0, columnspan=3, pady=(18, 0), sticky=tk.E)
@@ -141,6 +135,11 @@ class EditConstraintDialog(tk.Toplevel):
         create_primary_button(button_frame, text="Save Changes", command=self.on_ok).pack(
             side=tk.RIGHT
         )
+    def _parse_float_or_none(self, s: str):
+        s = (s or "").strip()
+        if not s:
+            return None
+        return float(s)
 
     def on_ok(self):
         left = self.left_var.get().strip()
