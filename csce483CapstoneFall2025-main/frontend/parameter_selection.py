@@ -1,17 +1,25 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 import re
 from typing import List
 
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.netlist_parse import Netlist, Component
+from .ui_theme import (
+    COLORS,
+    FONTS,
+    create_card,
+    create_primary_button,
+    create_secondary_button,
+    style_listbox,
+)
 
 class ParameterSelectionWindow(tk.Frame):
     def __init__(
         self, parent: tk.Tk, controller: "AppController"
     ):  # Use string annotation for type hint
-        super().__init__(parent)
+        super().__init__(parent, bg=COLORS["bg_primary"])
         self.controller = controller
         self.netlist_path = self.controller.get_app_data("netlist_path")
         self.available_parameters: List[str] = []
@@ -20,100 +28,117 @@ class ParameterSelectionWindow(tk.Frame):
 
         self.netlist: Netlist = None
 
-        # --- instructions/explanatory text ---
-        self.instructions = ttk.Frame(self)
-        self.instructions.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
-        explanatory_text = ttk.Label(self.instructions, text="Specify which parameters to optimize.", anchor="w")
-        explanatory_text.pack(side=tk.LEFT)
+        # Header
+        header = tk.Frame(
+            self,
+            bg=COLORS["bg_secondary"],
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+        )
+        header.pack(fill=tk.X, padx=32, pady=(32, 16))
+        tk.Label(
+            header,
+            text="Select Parameters",
+            font=FONTS["title"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w", padx=24, pady=(18, 4))
+        tk.Label(
+            header,
+            text="Choose which component parameters will be included in the optimization run.",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+            wraplength=620,
+            justify=tk.LEFT,
+        ).pack(anchor="w", padx=24, pady=(0, 18))
 
-        # --- Left Frame (Available Parameters) ---
-        self.left_frame = ttk.Frame(self)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Main content area
+        content = tk.Frame(self, bg=COLORS["bg_primary"])
+        content.pack(fill=tk.BOTH, expand=True, padx=32, pady=(0, 16))
 
-        self.available_label = ttk.Label(self.left_frame, text="Available Parameters")
-        self.available_label.pack()
+        list_container = tk.Frame(content, bg=COLORS["bg_primary"])
+        list_container.pack(fill=tk.BOTH, expand=True)
+        list_container.columnconfigure(0, weight=1)
+        list_container.columnconfigure(2, weight=1)
+        list_container.rowconfigure(0, weight=1)
 
-        # Use a Listbox with a Scrollbar
-        self.available_listbox_frame = ttk.Frame(self.left_frame)
-        self.available_listbox_frame.pack(fill=tk.BOTH, expand=True)
-
+        # Available parameters card
+        available_card = create_card(list_container)
+        available_card.grid(row=0, column=0, sticky="nsew")
+        available_body = available_card.inner
+        tk.Label(
+            available_body,
+            text="Available Parameters",
+            font=FONTS["subheading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w", pady=(0, 8))
+        available_list_frame = tk.Frame(available_body, bg=COLORS["bg_secondary"])
+        available_list_frame.pack(fill=tk.BOTH, expand=True)
         self.available_listbox = tk.Listbox(
-            self.available_listbox_frame, selectmode=tk.MULTIPLE
-        )  # Allow multiple selection
+            available_list_frame, selectmode=tk.MULTIPLE, exportselection=False
+        )
+        style_listbox(self.available_listbox)
         self.available_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.available_scrollbar = ttk.Scrollbar(
-            self.available_listbox_frame,
-            orient=tk.VERTICAL,
-            command=self.available_listbox.yview,
+        available_scrollbar = tk.Scrollbar(
+            available_list_frame, orient=tk.VERTICAL, command=self.available_listbox.yview
         )
-        self.available_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.available_listbox.config(yscrollcommand=self.available_scrollbar.set)
-        
-        # --- Buttons Frame (between listboxes) ---
-        self.buttons_frame = ttk.Frame(self)
-        self.buttons_frame.pack(side=tk.LEFT, padx=5)
+        available_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.available_listbox.config(yscrollcommand=available_scrollbar.set)
 
-        self.add_button = ttk.Button(
-            self.buttons_frame, text="Add ->", command=self.add_parameters
-        )
-        self.add_button.pack(pady=5)
+        # Action buttons between listboxes
+        action_column = tk.Frame(list_container, bg=COLORS["bg_primary"])
+        action_column.grid(row=0, column=1, padx=12)
+        create_primary_button(
+            action_column, text="Add ->", command=self.add_parameters
+        ).pack(pady=6)
+        create_primary_button(
+            action_column, text="Select All ->", command=self.select_all_parameters
+        ).pack(pady=6)
+        create_secondary_button(
+            action_column, text="<- Remove", command=self.remove_parameters
+        ).pack(pady=6)
+        create_secondary_button(
+            action_column, text="<- Remove All", command=self.remove_all_parameters
+        ).pack(pady=6)
 
-        self.remove_button = ttk.Button(
-            self.buttons_frame, text="<- Remove", command=self.remove_parameters
-        )
-        self.remove_button.pack(pady=5)
-
-        # --- Right Frame (Selected Parameters) ---
-        self.right_frame = ttk.Frame(self)
-        self.right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        self.selected_label = ttk.Label(self.right_frame, text="Selected Parameters")
-        self.selected_label.pack()
-
-        # Use a Listbox with Scrollbar
-        self.selected_listbox_frame = ttk.Frame(self.right_frame)
-        self.selected_listbox_frame.pack(fill=tk.BOTH, expand=True)
-
+        # Selected parameters card
+        selected_card = create_card(list_container)
+        selected_card.grid(row=0, column=2, sticky="nsew")
+        selected_body = selected_card.inner
+        tk.Label(
+            selected_body,
+            text="Selected Parameters",
+            font=FONTS["subheading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w", pady=(0, 8))
+        selected_list_frame = tk.Frame(selected_body, bg=COLORS["bg_secondary"])
+        selected_list_frame.pack(fill=tk.BOTH, expand=True)
         self.selected_listbox = tk.Listbox(
-            self.selected_listbox_frame, selectmode=tk.MULTIPLE
+            selected_list_frame, selectmode=tk.MULTIPLE, exportselection=False
         )
+        style_listbox(self.selected_listbox)
         self.selected_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        self.selected_scrollbar = ttk.Scrollbar(
-            self.selected_listbox_frame,
-            orient=tk.VERTICAL,
-            command=self.selected_listbox.yview,
+        selected_scrollbar = tk.Scrollbar(
+            selected_list_frame, orient=tk.VERTICAL, command=self.selected_listbox.yview
         )
-        self.selected_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.selected_listbox.config(yscrollcommand=self.selected_scrollbar.set)
+        selected_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.selected_listbox.config(yscrollcommand=selected_scrollbar.set)
 
-        # --- Navigation Buttons ---
-        self.navigation_frame = ttk.Frame(self)
-        self.navigation_frame.pack(side=tk.BOTTOM, fill=tk.X)  # Fill horizontally
-
-        self.back_button = ttk.Button(
-            self.navigation_frame, text="Back", command=self.go_back
+        # Footer navigation
+        footer = tk.Frame(self, bg=COLORS["bg_primary"])
+        footer.pack(fill=tk.X, padx=32, pady=(0, 32))
+        create_secondary_button(footer, text="Back", command=self.go_back).pack(
+            side=tk.LEFT
         )
-        self.back_button.pack(side=tk.LEFT, padx=10, pady=10)  # Pack on the LEFT
-
-        self.continue_button = ttk.Button(
-            self.navigation_frame,
-            text="Continue",
-            command=self.go_forward,
-            state=tk.DISABLED,
+        self.continue_button = create_primary_button(
+            footer, text="Continue", command=self.go_forward
         )
-        self.continue_button.pack(side=tk.RIGHT, padx=10, pady=10)  # Pack on the RIGHT
-
-        self.select_all_button = ttk.Button(
-            self.buttons_frame, text="Select All ->", command=self.select_all_parameters
-        )
-        self.select_all_button.pack(pady=5)
-
-        self.remove_all_button = ttk.Button(
-            self.buttons_frame, text="<- Remove All", command=self.remove_all_parameters
-        )
-        self.remove_all_button.pack(pady=5)
+        self.continue_button.configure(state=tk.DISABLED)
+        self.continue_button.pack(side=tk.RIGHT)
 
         # Load and parse parameters when the window is created
         if self.netlist_path:

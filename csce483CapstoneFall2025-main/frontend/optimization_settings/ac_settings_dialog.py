@@ -1,11 +1,22 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from ..ui_theme import (
+    COLORS,
+    FONTS,
+    apply_modern_theme,
+    create_card,
+    create_primary_button,
+    create_secondary_button,
+)
+
 
 class AcSettingsDialog(tk.Toplevel):
 
     def __init__(self, parent, initial_settings):
         super().__init__(parent)
+        apply_modern_theme(self)
+        self.configure(bg=COLORS["bg_primary"])
         self.title("AC Analysis Settings")
         self.resizable(False, False)
         self.result = None
@@ -24,10 +35,17 @@ class AcSettingsDialog(tk.Toplevel):
         self.focus_set()
 
     def _build_ui(self):
-        body = ttk.Frame(self, padding=12)
-        body.pack(fill=tk.BOTH, expand=True)
+        container = create_card(self)
+        container.pack(fill=tk.BOTH, expand=True, padx=24, pady=24)
+        body = container.inner
 
-        ttk.Label(body, text="Sweep Type").grid(row=0, column=0, sticky=tk.W, pady=4)
+        tk.Label(
+            body,
+            text="Sweep Type",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).grid(row=0, column=0, sticky=tk.W, pady=6)
         sweep_dropdown = ttk.Combobox(
             body,
             textvariable=self.sweep_var,
@@ -35,22 +53,50 @@ class AcSettingsDialog(tk.Toplevel):
             state="readonly",
             width=12,
         )
-        sweep_dropdown.grid(row=0, column=1, sticky=tk.W, pady=4)
+        sweep_dropdown.grid(row=0, column=1, sticky=tk.W, pady=6)
 
-        ttk.Label(body, text="Points").grid(row=1, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(body, textvariable=self.points_var, width=15).grid(row=1, column=1, sticky=tk.W, pady=4)
+        tk.Label(
+            body,
+            text="Points",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).grid(row=1, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(body, textvariable=self.points_var, width=15).grid(
+            row=1, column=1, sticky=tk.W, pady=6
+        )
 
-        ttk.Label(body, text="Start Frequency (Hz)").grid(row=2, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(body, textvariable=self.start_var, width=20).grid(row=2, column=1, sticky=tk.W, pady=4)
+        tk.Label(
+            body,
+            text="Start Frequency (Hz)",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).grid(row=2, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(body, textvariable=self.start_var, width=20).grid(
+            row=2, column=1, sticky=tk.W, pady=6
+        )
 
-        ttk.Label(body, text="Stop Frequency (Hz)").grid(row=3, column=0, sticky=tk.W, pady=4)
-        ttk.Entry(body, textvariable=self.stop_var, width=20).grid(row=3, column=1, sticky=tk.W, pady=4)
+        tk.Label(
+            body,
+            text="Stop Frequency (Hz)",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).grid(row=3, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(body, textvariable=self.stop_var, width=20).grid(
+            row=3, column=1, sticky=tk.W, pady=6
+        )
 
-        buttons = ttk.Frame(body)
-        buttons.grid(row=4, column=0, columnspan=2, pady=(12, 0), sticky=tk.E)
+        buttons = tk.Frame(body, bg=COLORS["bg_secondary"])
+        buttons.grid(row=4, column=0, columnspan=2, pady=(14, 0), sticky=tk.E)
 
-        ttk.Button(buttons, text="Cancel", command=self._on_cancel).pack(side=tk.RIGHT, padx=(0, 6))
-        ttk.Button(buttons, text="Save", command=self._on_save).pack(side=tk.RIGHT)
+        create_secondary_button(buttons, text="Cancel", command=self._on_cancel).pack(
+            side=tk.RIGHT, padx=(0, 10)
+        )
+        create_primary_button(buttons, text="Save", command=self._on_save).pack(
+            side=tk.RIGHT
+        )
 
         for child in body.winfo_children():
             if isinstance(child, ttk.Entry) or isinstance(child, ttk.Combobox):

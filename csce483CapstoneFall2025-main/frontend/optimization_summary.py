@@ -11,32 +11,17 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+from .ui_theme import COLORS as THEME_COLORS, apply_modern_theme
+
 
 class OptimizationSummary(tk.Frame):
-    
-    # Clean light theme color scheme
-    COLORS = {
-        'bg_primary': '#ffffff',
-        'bg_secondary': '#f8fafc',
-        'bg_tertiary': '#f1f5f9',
-        'accent': '#3b82f6',
-        'accent_hover': '#2563eb',
-        'success': '#10b981',
-        'warning': '#f59e0b',
-        'error': '#ef4444',
-        'text_primary': '#1e293b',
-        'text_secondary': '#64748b',
-        'border': '#e2e8f0',
-        'sidebar_bg': '#f1f5f9',
-        'log_bg': '#ffffff'
-    }
+    COLORS = THEME_COLORS
 
     def __init__(self, parent: tk.Tk, controller: "AppController"):
         super().__init__(parent)
         self.controller = controller
         self.parent = parent
         self.parent.title("Optimization Dashboard")
-        self.parent.configure(bg=self.COLORS['bg_primary'])
         # Set minimum window size to accommodate sidebar
         self.parent.minsize(800, 600)
         self.pack(fill=tk.BOTH, expand=True)

@@ -4,7 +4,8 @@ from .parameter_selection import ParameterSelectionWindow
 from .optimization_settings.optimization_settings_window import (
     OptimizationSettingsWindow,
 )
-from.optimization_summary import OptimizationSummary
+from .optimization_summary import OptimizationSummary
+from .ui_theme import apply_modern_theme
 from typing import Dict, Any, Optional
 
 import sys, os
@@ -15,6 +16,7 @@ class AppController:
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        apply_modern_theme(self.root)
         self.root.title("Circuit Optimizer")
         self.root.geometry("800x600")
         self.current_window: Optional[tk.Frame] = None
