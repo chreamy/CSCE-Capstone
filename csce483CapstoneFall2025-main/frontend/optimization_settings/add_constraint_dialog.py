@@ -2,6 +2,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List, Dict, Optional
 from .expression_evaluator import ExpressionEvaluator
+from ..ui_theme import (
+    COLORS,
+    FONTS,
+    apply_modern_theme,
+    create_card,
+    create_primary_button,
+    create_secondary_button,
+)
 
 
 class AddConstraintDialog(tk.Toplevel):
@@ -13,6 +21,8 @@ class AddConstraintDialog(tk.Toplevel):
         allowed_left_items: List[str],
     ):
         super().__init__(parent)
+        apply_modern_theme(self)
+        self.configure(bg=COLORS["bg_primary"])
 
         self.allowed_left_items = allowed_left_items
         self.title("Add Constraint")
@@ -26,53 +36,78 @@ class AddConstraintDialog(tk.Toplevel):
         self.evaluator = ExpressionEvaluator(
             parameters=parameters, node_expressions=node_expressions
         )
+
+        container = create_card(self)
+        container.pack(fill=tk.BOTH, expand=True, padx=24, pady=24)
+        body = container.inner
+        body.configure(bg=COLORS["bg_secondary"])
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        body.columnconfigure(2, weight=1)
+
         # --- Left Expression ---
-        left_frame = ttk.Frame(self)
-        left_frame.pack(side=tk.LEFT, padx=5, pady=5)
-        left_label = ttk.Label(left_frame, text="Left:")
-        left_label.pack()
+        left_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        tk.Label(
+            left_frame,
+            text="Left",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w")
         self.left_var = tk.StringVar()
         self.left_combobox = ttk.Combobox(
             left_frame,
             textvariable=self.left_var,
-            values=self.allowed_left_items,  # Use the passed list
-            state="readonly",  # Make it a dropdown only
-            width=20,  # Adjust width if needed
+            values=self.allowed_left_items,
+            state="readonly",
+            width=22,
         )
-        self.left_combobox.pack(fill=tk.X)
-        # Optional: Select first item if list is not empty
+        self.left_combobox.pack(fill=tk.X, pady=(6, 0))
         if self.allowed_left_items:
             self.left_combobox.current(0)
 
         # --- Operator ---
-        operator_frame = ttk.Frame(self)
-        operator_frame.pack(side=tk.LEFT, padx=5, pady=5)
-        operator_label = ttk.Label(operator_frame, text="Operator:")
-        operator_label.pack()
-        self.operator_var = tk.StringVar(value="=")  # Default to equals
+        operator_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+        operator_frame.grid(row=0, column=1, sticky="nsew", padx=12)
+        tk.Label(
+            operator_frame,
+            text="Operator",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w")
+        self.operator_var = tk.StringVar(value="=")
         operators = ["=", ">=", "<="]
         for op in operators:
-            op_radio = ttk.Radiobutton(
+            ttk.Radiobutton(
                 operator_frame, text=op, variable=self.operator_var, value=op
-            )
-            op_radio.pack(anchor=tk.W)  # Left-align radio buttons
+            ).pack(anchor="w", pady=(4, 0))
 
         # --- Right Expression/Value ---
-        right_frame = ttk.Frame(self)
-        right_frame.pack(side=tk.LEFT, padx=5, pady=5)
-        right_label = ttk.Label(right_frame, text="Right:")
-        right_label.pack()
+        right_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+        right_frame.grid(row=0, column=2, sticky="nsew", padx=(12, 0))
+        tk.Label(
+            right_frame,
+            text="Right",
+            font=FONTS["body"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w")
         self.right_var = tk.StringVar()
-        right_entry = ttk.Entry(right_frame, textvariable=self.right_var, width=15)
-        right_entry.pack(side=tk.LEFT)
+        ttk.Entry(right_frame, textvariable=self.right_var, width=22).pack(
+            fill=tk.X, pady=(6, 0)
+        )
 
         # --- OK and Cancel Buttons ---
-        button_frame = ttk.Frame(self)
-        button_frame.pack(pady=10)
-        ok_button = ttk.Button(button_frame, text="OK", command=self.on_ok)
-        ok_button.pack(side=tk.LEFT, padx=5)
-        cancel_button = ttk.Button(button_frame, text="Cancel", command=self.on_cancel)
-        cancel_button.pack(side=tk.LEFT, padx=5)
+        button_frame = tk.Frame(body, bg=COLORS["bg_secondary"])
+        button_frame.grid(row=1, column=0, columnspan=3, pady=(18, 0), sticky=tk.E)
+        create_secondary_button(button_frame, text="Cancel", command=self.on_cancel).pack(
+            side=tk.RIGHT, padx=(0, 10)
+        )
+        create_primary_button(button_frame, text="Add Constraint", command=self.on_ok).pack(
+            side=tk.RIGHT
+        )
 
     def on_ok(self):
         left = self.left_var.get().strip()
