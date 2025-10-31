@@ -21,7 +21,6 @@ class OptimizationSummary(tk.Frame):
         super().__init__(parent)
         self.controller = controller
         self.parent = parent
-        apply_modern_theme(self.parent)
         self.parent.title("Optimization Dashboard")
         # Set minimum window size to accommodate sidebar
         self.parent.minsize(800, 600)
