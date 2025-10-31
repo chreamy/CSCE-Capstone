@@ -1,6 +1,6 @@
 
 # Visual curve editors (Matplotlib embedded in Tkinter)
-from .visual_curve_editors import open_line_editor, open_heaviside_editor, open_step_editor
+from .visual_curve_editors import open_line_editor, open_heaviside_editor, open_piecewise_editor
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -15,7 +15,7 @@ class input_type(Enum):
     LINE = 1
     HEAVISIDE = 2
     UPLOAD = 3
-    STEP = 4
+    PIECEWISE  = 4
 
 class CurveFitSettings(tk.Frame):
     def __init__(self, parent: tk.Frame, parameters: List[str], nodes, controller: "AppController", inputs_completed_callback=None):
@@ -37,7 +37,7 @@ class CurveFitSettings(tk.Frame):
         ttk.Label(self.select_input_type_frame, text="Target Function Type: ").pack(side=tk.LEFT)
         answer = tk.StringVar()
         self.input_type_options = ttk.Combobox(self.select_input_type_frame, textvariable=answer)
-        self.input_type_options['values'] = ('Line','Heaviside','Upload', 'Step Function')
+        self.input_type_options['values'] = ('Line','Heaviside','Upload', 'Piecewise Linear')
         self.input_type_options.pack(side=tk.LEFT)
         if self.input_type_options['values']:
             self.input_type_options.current(0)
@@ -46,7 +46,7 @@ class CurveFitSettings(tk.Frame):
         self.frames['Line'] = self.create_line_frame()
         self.frames['Heaviside'] = self.create_heaviside_frame()
         self.frames['Upload'] = self.create_upload_frame()
-        self.frames['Step Function'] = self.create_step_frame()
+        self.frames['Piecewise Linear'] = self.create_piecewise_frame()
 
         for frame in self.frames.values():
             frame.pack_forget()
@@ -140,6 +140,7 @@ class CurveFitSettings(tk.Frame):
         start2, end2 = tuple2 
         return start1 <= end2 and start2 <= end1
 
+
     def check_if_in_previous_x_ranges(self, time_tuple) -> bool:
         # Iterate through each tuple in the list and check for intersection
         for existing_tuple in self.time_tuples_list:
@@ -176,9 +177,15 @@ class CurveFitSettings(tk.Frame):
                     line_start_x.delete(0, tk.END), line_start_x.insert(0, str(x0)),
                     line_end_x.delete(0, tk.END),   line_end_x.insert(0,   str(x1))
                 ),
-                on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1)
+                on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1),
+                on_save_constraint=self.push_constraint_from_editor,   # keeps working
+                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
             )
         ).pack(side=tk.LEFT, padx=6)
+
+
 
         self.custom_functions = []
         return line_frame
@@ -239,11 +246,18 @@ class CurveFitSettings(tk.Frame):
                 on_change=lambda a,t0,x1: (
                     heaviside_amplitude.delete(0, tk.END), heaviside_amplitude.insert(0, str(a)),
                     heaviside_start_x.delete(0, tk.END),   heaviside_start_x.insert(0, str(t0)),
-                    heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0,   str(x1))
+                    heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0, str(x1))
                 ),
-                on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1)
+                on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1),
+                on_save_constraint=self.push_constraint_from_editor,
+                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
             )
         ).pack(side=tk.LEFT, padx=6)
+
+
+
 
         return heaviside_frame
 
@@ -259,71 +273,98 @@ class CurveFitSettings(tk.Frame):
         curve_file_label.pack()
         return upload_frame
     
-    def create_step_frame(self):
+    def _build_piecewise_series(self, pts):
+        pts = sorted(pts, key=lambda p: p[0])
+        xs = [p[0] for p in pts]
+        x0, x1 = min(xs), max(xs)
+        X = np.linspace(x0, x1, 300); Y = np.zeros_like(X)
+        for i in range(len(pts)-1):
+            xa, ya = pts[i]; xb, yb = pts[i+1]
+            mask = (X >= xa) & (X <= xb)
+            span = (xb - xa) if xb > xa else 1.0
+            t = np.zeros_like(X); t[mask] = (X[mask] - xa) / span
+            Y[mask] = ya + t[mask]*(yb - ya)
+        return [[float(x), float(y)] for x, y in zip(X, Y)]
+
+    def _segments_from_piecewise(self, pts):
+        segs = []
+        pts = sorted(pts, key=lambda p: p[0])
+        for i in range(len(pts)-1):
+            x0, y0 = pts[i]; x1, y1 = pts[i+1]
+            if x1 <= x0: 
+                continue
+            m = (y1 - y0) / (x1 - x0)
+            b = y0 - m*x0
+            segs.append((m, b, x0, x1))
+        return segs
+
+    def _rebuild_all_line_segments(self):
+        """Re-publish all line-like segments for the exporter."""
+        segs = []
+        for item in self.func_model:
+            if item["type"] == "LINE":
+                segs.append(item["params"])  # (m,b,x0,x1)
+            elif item["type"] == "PIECEWISE":
+                segs.extend(self._segments_from_piecewise(item["params"]))
+            # HEAVISIDE/STEP can have their own path if/when needed
+        self.custom_functions = segs
+        self.controller.update_app_data("target_line_segments", segs)
+    
+    def create_piecewise_frame(self):
         frame = tk.Frame(self.select_input_type_frame)
         frame.pack()
-
-        # buffer we pass to the editor (list of (amp, t0, x1))
-        self._step_buffer = [(1.0, 0.0, 1.0)]
-
-        info = tk.StringVar(value="Steps: 1 | Range: [0.0 .. 1.0]")
+        self._pwl_points_buffer = [(0.0, 0.0), (1.0, 1.0)]
+        info = tk.StringVar(value="Points: 2 | Range: [0.0 .. 1.0]")
         ttk.Label(frame, textvariable=info).pack(side=tk.LEFT, padx=6)
 
         def _open_editor():
-            def _on_change(steps_list):
-                # update label live
-                if steps_list:
-                    xs0 = min(t0 for _,t0,_ in steps_list)
-                    xs1 = max(x1 for *_,x1 in steps_list)
-                    info.set(f"Steps: {len(steps_list)} | Range: [{xs0} .. {xs1}]")
+            def _on_change(pts):
+                if pts:
+                    xs = [p[0] for p in pts]
+                    info.set(f"Points: {len(pts)} | Range: [{min(xs)} .. {max(xs)}]")
                 else:
-                    info.set("Steps: 0")
-                self._step_buffer = list(steps_list)
-            open_step_editor(self, list(self._step_buffer), _on_change)
+                    info.set("Points: 0")
+                self._pwl_points_buffer = list(pts)
 
-        def _add_step_function():
-            if not self._step_buffer:
-                messagebox.showerror("Input Error", "Add at least one step in the editor first.")
+            open_piecewise_editor(
+                self,
+                list(self._pwl_points_buffer),
+                on_change=_on_change,
+                on_save_constraint=self.push_constraint_from_editor,
+                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
+            )
+
+
+
+        ttk.Button(frame, text="Open Visual Editor", command=_open_editor).pack(side=tk.LEFT, padx=6)
+
+        def _add_piecewise():
+            pts = list(self._pwl_points_buffer)
+            if len(pts) < 2:
+                messagebox.showerror("Input Error", "Add at least two points.")
                 return
-            # Add a STEP item to model/list and generate composite data
-            steps_copy = list(self._step_buffer)
-
-            # Optional: if you want to disallow overlaps ACROSS *different* STEP items,
-            # compute the union range and compare with existing items here.
-
-            # Update model and list
-            item = {"type": "STEP", "params": steps_copy}
+            xs = [p[0] for p in pts]; x0, x1 = min(xs), max(xs)
+            # reuse your overlap checker
+            if self.check_if_in_previous_x_ranges((x0, x1)):
+                return
+            # commit model/list
+            item = {"type":"PIECEWISE", "params": pts}
             self.func_model.append(item)
-
-            xs0 = min(t0 for _,t0,_ in steps_copy)
-            xs1 = max(x1 for *_,x1 in steps_copy)
-            desc = f"steps = {len(steps_copy)}"
-            rng  = f"[{xs0} to {xs1}]"
-            self.func_list.insert("", "end", values=("STEP", desc, rng))
-
-            # generate composite series
-            data_points = self._build_step_series(steps_copy)
+            self.time_tuples_list.append((x0, x1))
+            self.func_list.insert("", "end", values=("PIECEWISE", f"{len(pts)} points", f"[{x0} to {x1}]"))
+            # preview data & exporter segments
+            data_points = self._build_piecewise_series(pts)
             self.generated_data = data_points
             self.controller.update_app_data("generated_data", data_points)
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("function_button_pressed", True)
+            self._rebuild_all_line_segments()
 
-        ttk.Button(frame, text="Open Step Editor", command=_open_editor).pack(side=tk.LEFT, padx=6)
-        ttk.Button(frame, text="Add Step Function", command=_add_step_function).pack(side=tk.LEFT, padx=10)
-
+        ttk.Button(frame, text="Add Piecewise", command=_add_piecewise).pack(side=tk.LEFT, padx=10)
         return frame
-    
-    def _build_step_series(self, steps):
-        import numpy as np
-        # If you prefer *sum of steps*, allow overlaps and sum amplitudes:
-        xs0 = min(t0 for _,t0,_ in steps)
-        xs1 = max(x1 for *_,x1 in steps)
-        X = np.linspace(xs0, xs1, 300)
-        Y = np.zeros_like(X)
-        for a, t0, x1 in steps:
-            Y = Y + np.where((X >= t0) & (X <= x1), a, 0.0)
-        return [[float(x), float(y)] for x, y in zip(X, Y)]
-    
+
     def show_frame(self):
         selected_frame = self.input_type_options.get()
         if selected_frame in self.frames:
@@ -336,12 +377,18 @@ class CurveFitSettings(tk.Frame):
     def clear_existing_data(self):
         self.custom_functions = []
         self.generated_data = None
-        # Clear the see_inputted_functions frame
-        for widget in self.see_inputted_functions.winfo_children():
-            widget.destroy()
-        # Reset the buttons
+        # Only clear the table rows, keep the widget
+        try:
+            for iid in self.func_list.get_children():
+                self.func_list.delete(iid)
+        except Exception:
+            pass
+        # Reset state/buttons
         self.line_button.config(state=tk.NORMAL)
         self.heaviside_button.config(state=tk.NORMAL)
+        self.func_model.clear()
+        self.time_tuples_list.clear()
+
 
     def add_function(self, in_type, arg1, arg2, arg3, arg4):
         if in_type == input_type.LINE:
@@ -366,6 +413,7 @@ class CurveFitSettings(tk.Frame):
             item = {"type":"LINE", "params":(slope, y_int, x_start, x_end)}
             self.func_model.append(item)
             self.func_list.insert("", "end", values=("LINE", string_func, rng))
+            self._rebuild_all_line_segments()
 
         elif in_type == input_type.HEAVISIDE:
             amplitude = float(arg1.get()); x_start = float(arg2.get()); x_end = float(arg3.get())
@@ -386,6 +434,7 @@ class CurveFitSettings(tk.Frame):
             item = {"type":"HEAVISIDE", "params":(amplitude, x_start, x_end)}
             self.func_model.append(item)
             self.func_list.insert("", "end", values=("HEAVISIDE", f"amplitude = {amplitude}", f"[{x_start} to {x_end}]"))
+            self._rebuild_all_line_segments()
 
         else:
             return
@@ -400,19 +449,37 @@ class CurveFitSettings(tk.Frame):
         idx = self._selected_index()
         if idx is None:
             return
+
         item = self.func_model.pop(idx)
+
+        # CHANGED: compute the range per type
         if item["type"] == "LINE":
             _, _, x0, x1 = item["params"]
-        else:
+        elif item["type"] == "HEAVISIDE":
             _, x0, x1 = item["params"]
+        elif item["type"] == "PIECEWISE":
+            pts = item["params"]
+            xs = [p[0] for p in pts] if pts else []
+            if xs:
+                x0, x1 = min(xs), max(xs)
+            else:
+                x0, x1 = 0.0, 0.0
+        else:
+            x0, x1 = 0.0, 0.0  # safety
+
         try:
             self.time_tuples_list.remove((x0, x1))
         except ValueError:
             pass
+
         self.func_list.delete(self.func_list.get_children()[idx])
+
         if not self.func_model:
             self.line_button.config(state=tk.NORMAL)
             self.heaviside_button.config(state=tk.NORMAL)
+
+        self._rebuild_all_line_segments()  # ADDED
+
 
     def edit_selected_function(self):
         idx = self._selected_index()
@@ -451,6 +518,7 @@ class CurveFitSettings(tk.Frame):
                 self.time_tuples_list.append((xa, xb))
                 curr_range = (xa, xb)
                 x0, x1 = xa, xb
+                self._rebuild_all_line_segments()
             open_line_editor(self, slope, yint, x0, x1, _apply)
         elif item["type"] == "HEAVISIDE":
             amp, x0, x1 = item["params"]
@@ -481,28 +549,57 @@ class CurveFitSettings(tk.Frame):
                 self.time_tuples_list.append((t0, x1_new))
                 curr_range = (t0, x1_new)
                 x0, x1 = t0, x1_new
+                self._rebuild_all_line_segments()
             open_heaviside_editor(self, amp, x0, x1, _apply)
         else:
-            steps = item["params"]
+            pts = item["params"]  # list of (x,y)
+            # compute and remember the current x-range for overlap tracking
+            xs = [p[0] for p in pts]
+            curr_range = (min(xs), max(xs)) if xs else (0.0, 0.0)
 
-            def _apply(new_steps):
-                # commit
-                self.func_model[idx] = {"type": "STEP", "params": list(new_steps)}
-                # regenerate curve
-                data_points = self._build_step_series(new_steps)
+            def _on_change(new_pts):
+                # Live-apply from the editor
+                nonlocal curr_range
+                if len(new_pts) < 2:
+                    return  # need at least two points to form a segment
+
+                # Temporarily remove old range so we don't collide with ourselves
+                try:
+                    self.time_tuples_list.remove(curr_range)
+                except ValueError:
+                    pass
+
+                xs_new = [p[0] for p in new_pts]
+                new_range = (min(xs_new), max(xs_new))
+
+                if self.check_if_in_previous_x_ranges(new_range):
+                    # restore old range and abort this change
+                    self.time_tuples_list.append(curr_range)
+                    return
+
+                # Commit model
+                self.func_model[idx] = {"type": "PIECEWISE", "params": list(new_pts)}
+
+                # Preview data
+                data_points = self._build_piecewise_series(new_pts)
                 self.generated_data = data_points
                 self.controller.update_app_data("generated_data", data_points)
                 if self.inputs_completed_callback:
                     self.inputs_completed_callback("function_button_pressed", True)
-                # update UI row
-                xs0 = min(t0 for _,t0,_ in new_steps)
-                xs1 = max(x1 for *_,x1 in new_steps)
-                desc = f"steps = {len(new_steps)}"
-                rng  = f"[{xs0} to {xs1}]"
-                row_id = self.func_list.get_children()[idx]
-                self.func_list.item(row_id, values=("STEP", desc, rng))
 
-            open_step_editor(self, list(steps), on_change=_apply)
+                # Update UI row
+                row_id = self.func_list.get_children()[idx]
+                desc = f"{len(new_pts)} points"
+                rng  = f"[{new_range[0]} to {new_range[1]}]"
+                self.func_list.item(row_id, values=("PIECEWISE", desc, rng))
+
+                # Track new range and rebuild exporter segments
+                self.time_tuples_list.append(new_range)
+                curr_range = new_range
+                self._rebuild_all_line_segments()  # ADDED
+
+            # Open the PIECEWISE editor with live on_change
+            open_piecewise_editor(self, list(pts), _on_change)
 
     def select_curve_file_and_process(self):
         file_path = filedialog.askopenfilename(
@@ -633,3 +730,57 @@ class CurveFitSettings(tk.Frame):
             self.y_param_label.config(text="Y Parameter (Phase degrees):")
         else:
             self.y_param_label.config(text="Y Parameter (Magnitude):")
+    
+    
+    def push_constraint_from_editor(self, cdict: dict) -> None:
+        """
+        Accepts {"left","op","right","x_start","x_end"} from visual editors,
+        converts to the table's expected keys, saves to controller state,
+        and inserts a row in the Constraints table UI.
+        """
+        # Validate & normalize
+        try:
+            left   = str(cdict.get("left", "")).strip()
+            op     = str(cdict.get("op", "")).strip()
+            right  = float(cdict.get("right"))
+            x_min  = float(cdict.get("x_start"))
+            x_max  = float(cdict.get("x_end"))
+        except Exception:
+            messagebox.showerror("Constraint", "Please enter numeric Right/From/To.")
+            return
+
+        if not left or op not in {"=", ">=", "<="}:
+            messagebox.showerror("Constraint", "Choose Left and an operator (=, >=, <=).")
+            return
+        if x_min >= x_max:
+            messagebox.showerror("Constraint", "From x must be < To x.")
+            return
+
+        # Persist in controller app_data (optional, if you track constraints there)
+        store = self.controller.get_app_data("constraints") or []
+        row = {"left": left, "operator": op, "right": right, "x_min": x_min, "x_max": x_max}
+        store.append(row)
+        self.controller.update_app_data("constraints", store)
+
+        # Insert into the on-screen table (this is what you were missing)
+        tbl = getattr(self.controller, "constraint_table", None)
+        if tbl is not None and hasattr(tbl, "add_constraint"):
+            tbl.add_constraint(row)  # expects left/operator/right/x_min/x_max
+        else:
+            # Not fatal, but helpful to know if the table isn't wired yet
+            print("Constraint table not available; saved to app_data only.")
+
+        messagebox.showinfo("Constraint", "Saved constraint to model.")
+
+
+
+    def _constraint_left_options(self):
+        """
+        Build the 'Left' dropdown options to mirror your Add Constraint dialog.
+        - Components/params: self.parameters (e.g., ['R1', 'C1', ...])
+        - Node voltages: V(node) for each node
+        """
+        node_vs = [f"V({node})" for node in self.nodes]
+        # If your dialog uses a specific ordering, adjust here
+        return list(self.parameters) + node_vs
+

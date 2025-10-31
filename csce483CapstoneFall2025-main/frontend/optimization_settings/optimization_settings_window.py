@@ -199,6 +199,7 @@ class OptimizationSettingsWindow(tk.Frame):
             self.remove_constraint,  # Pass remove_constraint
             self.open_edit_constraint_dialog,  # Pass edit constraint
         )
+        setattr(self.controller, "constraint_table", self.constraint_table)
         self.constraint_table.pack(fill=tk.BOTH, expand=True)
 
         # --- Horizontal Button Container (Shared Frame) ---

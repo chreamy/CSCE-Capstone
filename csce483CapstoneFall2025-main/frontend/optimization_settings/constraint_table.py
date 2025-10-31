@@ -11,25 +11,42 @@ class ConstraintTable(ttk.Treeview):
         remove_callback: Callable[[], None],
         edit_callback: Callable[[Dict[str, str], int], None],
     ):
-        super().__init__(parent, columns=("Left", "Operator", "Right"), show="headings")
+        super().__init__(parent, columns=("Left", "Operator", "Right", "X-Range"), show="headings")
         self.heading("Left", text="Left")
         self.heading("Operator", text="Operator")
         self.heading("Right", text="Right")
-        self.column("Left", width=100)
-        self.column("Operator", width=50)
-        self.column("Right", width=100)
+        self.heading("X-Range", text="X-Range")
+        self.column("Left", width=120)
+        self.column("Operator", width=70, anchor="center")
+        self.column("Right", width=140)
+        self.column("X-Range", width=160)
 
         # Store the callbacks
         self.add_callback = add_callback
         self.remove_callback = remove_callback
         self.edit_callback = edit_callback
-
+        
+    def _fmt_xrange(self, cdict):
+        xmin = cdict.get("x_min", None)
+        xmax = cdict.get("x_max", None)
+        if xmin is None and xmax is None:
+            return "All"
+        if xmin is None:
+            return f"(-inf .. {xmax})"
+        if xmax is None:
+            return f"({xmin} .. +inf)"
+        return f"[{xmin} .. {xmax}]"
+    
     def add_constraint(self, constraint: Dict[str, str]):
-        """Adds a constraint to the Treeview."""
         self.insert(
             "",
             tk.END,
-            values=(constraint["left"], constraint["operator"], constraint["right"]),
+            values=(
+                constraint["left"],
+                constraint["operator"],
+                constraint["right"],
+                self._fmt_xrange(constraint),
+            ),
         )
 
     def remove_constraint(self):
@@ -65,11 +82,15 @@ class ConstraintTable(ttk.Treeview):
         self.edit_callback(constraint, index)  # Call the edit callback
 
     def update_constraint(self, index: int, constraint: Dict[str, str]):
-        """Updates the values of a constraint row in the Treeview."""
         item_id = self.get_children()[index]
         self.item(
             item_id,
-            values=(constraint["left"], constraint["operator"], constraint["right"]),
+            values=(
+                constraint["left"],
+                constraint["operator"],
+                constraint["right"],
+                self._fmt_xrange(constraint),
+            ),
         )
 
     def clear(self):

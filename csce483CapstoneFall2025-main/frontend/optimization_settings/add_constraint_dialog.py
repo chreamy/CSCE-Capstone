@@ -66,6 +66,18 @@ class AddConstraintDialog(tk.Toplevel):
         right_entry = ttk.Entry(right_frame, textvariable=self.right_var, width=15)
         right_entry.pack(side=tk.LEFT)
 
+        # --- X-Window (optional) ---
+        xwin_frame = ttk.Frame(self)
+        xwin_frame.pack(side=tk.LEFT, padx=10, pady=5)
+
+        ttk.Label(xwin_frame, text="From x:").grid(row=0, column=0, sticky="w")
+        self.xmin_var = tk.StringVar()
+        ttk.Entry(xwin_frame, textvariable=self.xmin_var, width=10).grid(row=0, column=1, padx=(4, 10))
+
+        ttk.Label(xwin_frame, text="To x:").grid(row=1, column=0, sticky="w")
+        self.xmax_var = tk.StringVar()
+        ttk.Entry(xwin_frame, textvariable=self.xmax_var, width=10).grid(row=1, column=1, padx=(4, 10))
+
         # --- OK and Cancel Buttons ---
         button_frame = ttk.Frame(self)
         button_frame.pack(pady=10)
@@ -73,6 +85,13 @@ class AddConstraintDialog(tk.Toplevel):
         ok_button.pack(side=tk.LEFT, padx=5)
         cancel_button = ttk.Button(button_frame, text="Cancel", command=self.on_cancel)
         cancel_button.pack(side=tk.LEFT, padx=5)
+
+    def _parse_float_or_none(self, s: str):
+        s = (s or "").strip()
+        if not s:
+            return None
+        return float(s)
+
 
     def on_ok(self):
         left = self.left_var.get().strip()
@@ -83,46 +102,40 @@ class AddConstraintDialog(tk.Toplevel):
             messagebox.showerror("Error", "All fields are required.")
             return
 
-        # --- NEW: Validate Left Side ---
-        # Check if 'left' is exactly one of the known parameters or node expressions
-        is_valid_left, left_vars = self.evaluator.validate_expression(left)
-        # We need a stricter check: is it *just* a name, and is that name allowed?
-        # Simple check: is the raw string in our allowed list?
-        if left not in (
-            self.parameters + self.node_expressions
-        ):  # Check against combined originals
-            allowed_examples = ", ".join(self.all_allowed_vars_display[:3]) + (
-                "..." if len(self.all_allowed_vars_display) > 3 else ""
-            )
+        # left must be a single allowed symbol (parameter or node)
+        is_valid_left, _ = self.evaluator.validate_expression(left)
+        if left not in (self.parameters + self.node_expressions):
             messagebox.showerror(
                 "Validation Error",
-                f"Invalid left-hand side: '{left}'.\n\nMust be a single selected parameter or node expression.\n\nCurrently allowed: {allowed_examples}",
+                f"Invalid left-hand side: '{left}'. Must be one of: {', '.join(self.all_allowed_vars_display)}",
                 parent=self,
             )
-            return  # --- END NEW ---
+            return
 
-        # --- Existing validation for Right Side (allow expressions or numbers) ---
+        # right can be number or expression (your existing helper)
         if not self.is_valid_input(right):
-            return  # --- END Existing ---
+            return
 
-        # If all validation passes:
-        # In AddConstraintDialog.on_ok:
+        # NEW: parse optional x-window
+        try:
+            xmin = self._parse_float_or_none(self.xmin_var.get())
+            xmax = self._parse_float_or_none(self.xmax_var.get())
+            if xmin is not None and xmax is not None and xmin >= xmax:
+                messagebox.showerror("Validation Error", "From x must be less than To x.", parent=self)
+                return
+        except ValueError:
+            messagebox.showerror("Validation Error", "From x / To x must be numbers.", parent=self)
+            return
+
+        # Save and close
         self.constraint = {
             "left": left,
             "operator": operator,
             "right": right,
-        }  # Type added later in OptimizationSettingsWindow
-        self.destroy()
-
-        # In EditConstraintDialog.on_ok:
-        if self.constraint is not None:
-            self.constraint["left"] = left
-            self.constraint["operator"] = operator
-            self.constraint["right"] = right
-            # Type will be updated in OptimizationSettingsWindow after dialog closes
-        else:
-            # Fallback, though shouldn't happen in edit mode
-            self.constraint = {"left": left, "operator": operator, "right": right}
+            # NEW:
+            "x_min": xmin,
+            "x_max": xmax,
+        }
         self.destroy()
 
     def on_cancel(self):

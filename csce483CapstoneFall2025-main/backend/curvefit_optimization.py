@@ -363,13 +363,37 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
 
             xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
 
-            for node_name, (node_lower, node_upper) in node_constraints.items():
+            for node_name, windows in node_constraints.items():
                 node_index = resolve_header_index(node_name, "Node variable")
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
+                # Match AC dB behavior you already have
                 if analysis_mode == "ac" and response_mode == "magnitude_db" and node_name.startswith("VM("):
                     node_values = 20.0 * np.log10(np.maximum(node_values, 1e-30))
-                if (node_lower is not None and np.any(node_values < node_lower)) or (node_upper is not None and np.any(node_values > node_upper)):
-                    return np.full_like(run_state["master_x_points"], 1e6)  # TODO: Right now its just an arbitrarily large penalty
+
+                # X axis values for masking windows
+                X_vals = X_ARRAY_FROM_XYCE  # already built above
+
+                for w in windows:
+                    lower = w.get("lower", None)
+                    upper = w.get("upper", None)
+                    xmin  = w.get("xmin", None)
+                    xmax  = w.get("xmax", None)
+
+                    mask = np.ones_like(X_vals, dtype=bool)
+                    if xmin is not None:
+                        mask &= (X_vals >= float(xmin))
+                    if xmax is not None:
+                        mask &= (X_vals <= float(xmax))
+
+                    if not np.any(mask):
+                        continue  # nothing to check in this window
+
+                    vals = node_values[mask]
+                    if ((lower is not None and np.any(vals < float(lower))) or
+                        (upper is not None and np.any(vals > float(upper)))):
+                        # Same arbitrarily large penalty strategy you're using today
+                        return np.full_like(run_state["master_x_points"], 1e6)
+
 
             # TODO: Proper residual? (subrtarct, rms, etc.)
             return ideal_interpolation(run_state["master_x_points"]) - xyce_interpolation(run_state["master_x_points"])

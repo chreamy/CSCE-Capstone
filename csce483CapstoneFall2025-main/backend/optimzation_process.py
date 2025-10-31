@@ -77,30 +77,54 @@ def normalize_observable_for_analysis(observable, analysis_type="transient", ac_
 
 
 def add_node_constraints(constraints, analysis_type="transient", ac_response="magnitude"):
-    formatted_constraints = {}
-    for constraint in constraints:
-        if constraint.get("type") != "node":
+    """
+    Returns: dict[str, list[dict]]
+      key   = normalized node expression (e.g., VM(OUT))
+      value = list of window dicts: {"lower": float|None, "upper": float|None,
+                                     "xmin": float|None, "xmax": float|None}
+    """
+    formatted = {}
+    for c in constraints:
+        if c.get("type") != "node":
             continue
 
-        key = normalize_observable_for_analysis(constraint.get("left", ""), analysis_type, ac_response)
+        key = normalize_observable_for_analysis(c.get("left", ""), analysis_type, ac_response)
         if not key:
             continue
 
+        # parse numeric bound
         try:
-            value = float(str(constraint.get("right", "")).strip())
+            val = float(str(c.get("right", "")).strip())
         except (TypeError, ValueError):
             continue
 
-        operator = (constraint.get("operator") or "").strip()
-        lower, upper = formatted_constraints.get(key, (None, None))
+        op = (c.get("operator") or "").strip()
+        lower = upper = None
+        if op == ">=":
+            lower = val
+        elif op == "<=":
+            upper = val
+        elif op == "=":
+            lower = val
+            upper = val
 
-        if operator == ">=":
-            lower = value if lower is None else max(lower, value)
-        elif operator == "<=":
-            upper = value if upper is None else min(upper, value)
-        formatted_constraints[key] = (lower, upper)
+        # optional x window
+        xmin = c.get("x_min", None)
+        xmax = c.get("x_max", None)
+        try:
+            xmin = float(xmin) if xmin not in (None, "",) else None
+        except (TypeError, ValueError):
+            xmin = None
+        try:
+            xmax = float(xmax) if xmax not in (None, "",) else None
+        except (TypeError, ValueError):
+            xmax = None
 
-    return formatted_constraints
+        window = {"lower": lower, "upper": upper, "xmin": xmin, "xmax": xmax}
+        formatted.setdefault(key, []).append(window)
+
+    return formatted
+
 
 def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds):
     original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
