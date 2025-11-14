@@ -262,7 +262,7 @@ class Netlist:
                     print("analysis command detected already. Removing from copy...")
                     continue
                 if keyword == ".PRINT":
-                    print("print command detected already Removing from copy...")
+                    print("print command detected already. Removing from copy...")
                     continue
                 filtered_lines.append(line)
 
