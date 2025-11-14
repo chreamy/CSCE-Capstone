@@ -5,6 +5,14 @@ import re
 import numpy as np
 from backend.curvefit_optimization import curvefit_optimize, get_current_session_number
 
+_MIN_SWEEP_FREQ = 1e-12  # Prevent zero-frequency AC/Noise sweeps
+_DB_FLOOR = 1e-30
+
+
+def _linear_to_db(value: float) -> float:
+    """Convert linear magnitude to dB with a safe floor."""
+    return 20.0 * np.log10(max(value, _DB_FLOOR))
+
 def add_part_constraints(constraints, netlist):
     equalConstraints = []
     for constraint in constraints:
@@ -131,6 +139,8 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
     try:
         constraints = (curveData or {}).get("constraints", [])
         target_expression = (curveData or {}).get("y_parameter_expression") or (curveData or {}).get("y_parameter", "")
+        if ((curveData or {}).get("analysis_type") or "").strip().lower() == "noise":
+            target_expression = (curveData or {}).get("y_parameter") or "ONOISE"
         target_display = target_expression
         TEST_ROWS = testRows or []
         ORIG_NETLIST_PATH = netlistPath
@@ -140,6 +150,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
 
         analysis_type = ((curveData or {}).get("analysis_type") or "transient").strip().lower()
         ac_settings = (curveData or {}).get("ac_settings") or {}
+        noise_settings = (curveData or {}).get("noise_settings") or {}
         ac_response_alias = (ac_settings.get("response") if isinstance(ac_settings, dict) else None) or "magnitude"
         ac_response_alias = ac_response_alias.strip().lower()
         response_aliases = {
@@ -158,6 +169,12 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             ac_response = "magnitude"
 
         y_units = (curveData or {}).get("y_units", "")
+        noise_quantity = (noise_settings.get("quantity") if isinstance(noise_settings, dict) else None) or "onoise"
+        noise_quantity = noise_quantity.strip().lower()
+        valid_noise_quantities = {"onoise", "onoise_db", "inoise", "inoise_db"}
+        if noise_quantity not in valid_noise_quantities:
+            noise_quantity = "onoise"
+
         if analysis_type == "ac":
             units_lower = str(y_units).lower()
             if "db" in units_lower:
@@ -168,6 +185,11 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                 ac_response = "phase"
                 if isinstance(ac_settings, dict):
                     ac_settings["response"] = "phase"
+        elif analysis_type == "noise":
+            if "db" in str(y_units).lower():
+                noise_quantity = "onoise_db" if noise_quantity.startswith("o") else "inoise_db"
+                if isinstance(noise_settings, dict):
+                    noise_settings["quantity"] = noise_quantity
 
         if analysis_type == "ac" and ac_response == "magnitude_db":
             converted_rows = []
@@ -177,15 +199,24 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                     y_val = float(row[1])
                 except (TypeError, ValueError, IndexError):
                     continue
-                if y_val <= 0:
-                    y_val = 1e-30
-                converted_rows.append([x_val, 20.0 * np.log10(y_val)])
+                converted_rows.append([x_val, _linear_to_db(y_val)])
+            TEST_ROWS = converted_rows
+        elif analysis_type == "noise" and noise_quantity.endswith("_db"):
+            converted_rows = []
+            for row in TEST_ROWS:
+                try:
+                    x_val = float(row[0])
+                    y_val = float(row[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                converted_rows.append([x_val, _linear_to_db(y_val)])
             TEST_ROWS = converted_rows
 
-        normalized_target = normalize_observable_for_analysis(target_display, analysis_type, ac_response)
+        target_identifier = (curveData or {}).get("y_parameter") or target_display
+        normalized_target = normalize_observable_for_analysis(target_identifier, analysis_type, ac_response)
         x_parameter = (curveData or {}).get("x_parameter")
         if not x_parameter:
-            x_parameter = "FREQ" if analysis_type == "ac" else "TIME"
+            x_parameter = "FREQ" if analysis_type in {"ac", "noise"} else "TIME"
         x_parameter = str(x_parameter).strip().upper()
 
         session_num = get_current_session_number()
@@ -195,6 +226,9 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
 
         NODE_CONSTRAINTS = add_node_constraints(constraints, analysis_type, ac_response)
+        if analysis_type == "noise" and NODE_CONSTRAINTS:
+            print("Node constraints are not applied during noise analysis.")
+            NODE_CONSTRAINTS = {}
 
         print(f"TARGET_VALUE (display) = {target_display}")
         print(f"TARGET_VALUE (normalized) = {normalized_target}")
@@ -203,6 +237,11 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         print(f"WRIITABLE_NETLIST_PATH = {WRITABLE_NETLIST_PATH}")
         print(f"Analysis type = {analysis_type}")
         print(f"Node constraints (normalized) = {NODE_CONSTRAINTS}")
+        if analysis_type == "noise" and NODE_CONSTRAINTS:
+            msg = "Node constraints are ignored during noise analysis."
+            print(msg)
+            queue.put(("Log", msg))
+            NODE_CONSTRAINTS = {}
 
         for component in NETLIST.components:
             if component.name in selectedParameters:
@@ -263,7 +302,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             start_frequency = ac_settings.get("start_frequency", ac_settings.get("start_freq"))
             stop_frequency = ac_settings.get("stop_frequency", ac_settings.get("stop_freq"))
 
-            default_start = max(initValue, 1e-12) if TEST_ROWS else 1e-12
+            default_start = max(initValue, _MIN_SWEEP_FREQ) if TEST_ROWS else _MIN_SWEEP_FREQ
             if start_frequency is None or start_frequency <= 0:
                 start_frequency = default_start
             if stop_frequency is None or stop_frequency <= start_frequency:
@@ -279,6 +318,49 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                 start_frequency,
                 stop_frequency,
                 print_variables,
+            )
+        elif analysis_type == "noise":
+            sweep = (
+                noise_settings.get("sweep_type")
+                or noise_settings.get("sweep")
+                or "DEC"
+            )
+            points = (
+                noise_settings.get("points")
+                or noise_settings.get("points_per_decade")
+                or noise_settings.get("points_per_interval")
+                or 10
+            )
+            try:
+                points = int(float(points))
+            except (TypeError, ValueError):
+                points = 10
+            start_frequency = noise_settings.get("start_frequency")
+            stop_frequency = noise_settings.get("stop_frequency")
+            default_start = max(initValue, _MIN_SWEEP_FREQ) if TEST_ROWS else _MIN_SWEEP_FREQ
+            if start_frequency is None or start_frequency <= 0:
+                start_frequency = default_start
+            if stop_frequency is None or stop_frequency <= start_frequency:
+                default_stop = max(endValue, start_frequency * 10)
+                if default_stop <= start_frequency:
+                    default_stop = start_frequency * 10
+                stop_frequency = default_stop
+            node = (noise_settings.get("output_node") or "").strip()
+            source_name = (noise_settings.get("input_source") or "").strip()
+            if not node:
+                raise ValueError("Noise analysis requires an output node.")
+            if not source_name:
+                raise ValueError("Noise analysis requires an input source.")
+            source_name = source_name.upper()
+            output_expression = node if node.strip().upper().startswith("V(") else f"V({node})"
+            NETLIST.writeNoiseCmdsToFile(
+                WRITABLE_NETLIST_PATH,
+                sweep,
+                points,
+                start_frequency,
+                stop_frequency,
+                output_expression,
+                source_name,
             )
         else:
             span = endValue - initValue
@@ -311,6 +393,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             analysis_type=analysis_type,
             x_parameter=x_parameter,
             ac_response=ac_response,
+            noise_settings=noise_settings if analysis_type == "noise" else None,
         )
 
         NETLIST.file_path = ORIG_NETLIST_PATH

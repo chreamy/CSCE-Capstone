@@ -5,10 +5,18 @@ import sys
 import os
 import glob
 from datetime import datetime
+from typing import Optional, Dict, Any
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 from backend.xyce_parsing_function import parse_xyce_prn_output
 from backend.netlist_parse import Netlist
+
+_SMALL_POSITIVE = 1e-30
+
+
+def _convert_array_to_db(values: np.ndarray) -> np.ndarray:
+    """Convert magnitude array to dB using a safe numeric floor."""
+    return 20.0 * np.log10(np.maximum(values, _SMALL_POSITIVE))
 
 def log_to_file(message: str, log_file: str = None):
     """Write log message to log file."""
@@ -81,7 +89,38 @@ node_constraints = {
     'V(3)': (1.0, None)   # Example: V(3) must be >= 1V
 }
 """
-def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list, queue, custom_xtol=1e-12, custom_gtol=1e-12, custom_ftol=1e-12, analysis_type="transient", x_parameter="TIME", ac_response="magnitude") -> None:
+def curvefit_optimize(
+    target_value: str,
+    target_curve_rows: list,
+    netlist: Netlist,
+    writable_netlist_path: str,
+    node_constraints: dict,
+    equality_part_constraints: list,
+    queue,
+    custom_xtol=1e-12,
+    custom_gtol=1e-12,
+    custom_ftol=1e-12,
+    analysis_type="transient",
+    x_parameter="TIME",
+    ac_response="magnitude",
+    noise_settings: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Run the curve-fitting optimization for the requested analysis mode.
+
+    Args:
+        target_value: normalized observable name (e.g., V(OUT), ONOISE).
+        target_curve_rows: [[x, y], ...] describing the desired curve.
+        netlist: parsed Netlist instance to mutate/write out.
+        writable_netlist_path: temp path passed to Xyce.
+        node_constraints: mapping of constraint windows by node.
+        equality_part_constraints: list of part equality rules to enforce.
+        queue: IPC queue for UI/log updates.
+        custom_xtol/gtol/ftol: least_squares tolerances.
+        analysis_type/x_parameter/ac_response: metadata from the UI.
+        noise_settings: optional dict with noise sweep metadata; copied locally
+            before mutation to avoid altering caller-owned dictionaries.
+    """
     # Get the session log file path
     session_log_file = get_session_log_file()
     
@@ -97,7 +136,17 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
         "real": "real",
         "imag": "imag",
     }
-    response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
+    noise_settings = dict(noise_settings or {})
+    valid_noise_quantities = {"onoise", "onoise_db", "inoise", "inoise_db"}
+    noise_quantity = str(noise_settings.get("quantity", "onoise")).strip().lower()
+    if noise_quantity not in valid_noise_quantities:
+        noise_quantity = "onoise"
+
+    response_mode = "magnitude"
+    if analysis_mode == "ac":
+        response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
+    elif analysis_mode == "noise":
+        response_mode = noise_quantity
 
     # Initialize log file with session header
     session_start_time = datetime.now()
@@ -118,6 +167,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             "imag": "imag",
         }.get(response_mode, response_mode)
         log_to_file(f"AC response: {response_label}", session_log_file)
+    elif analysis_mode == "noise":
+        log_to_file(f"Noise quantity: {noise_quantity}", session_log_file)
     log_to_file(f"Optimization parameters:", session_log_file)
     log_to_file(f"  xtol: {custom_xtol}", session_log_file)
     log_to_file(f"  gtol: {custom_gtol}", session_log_file)
@@ -135,6 +186,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
     queue.put(("Log", f"X-axis variable: {x_axis_identifier}"))
     if analysis_mode == "ac":
         queue.put(("Log", f"AC response: {response_label}"))
+    elif analysis_mode == "noise":
+        queue.put(("Log", f"Noise quantity: {noise_quantity}"))
     queue.put(("Log", f"Optimization parameters:"))
     queue.put(("Log", f"  xtol: {custom_xtol}"))
     queue.put(("Log", f"  gtol: {custom_gtol}"))
@@ -179,6 +232,17 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
         output_suffixes = [".prn"]
         if analysis_mode == "ac":
             output_suffixes = [".FD.prn"] + output_suffixes
+        elif analysis_mode == "noise":
+            output_suffixes = [
+                # Primary noise sweep results (ONOISE/INOISE columns)
+                ".NOISE.prn",
+                # Some Xyce builds emit additional noise info in a ".NOISE0" file
+                ".NOISE0.prn",
+                # Noise analyses can also reuse AC data, so check for .FD outputs too
+                ".FD.prn",
+            ] + output_suffixes
+        elif analysis_mode == "noise":
+            output_suffixes = [".NOISE.prn", ".NOISE0.prn", ".FD.prn"] + output_suffixes
 
         def _remove_old_outputs(base_path: str) -> None:
             for suffix in output_suffixes:
@@ -350,6 +414,12 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             Y_ARRAY_FROM_XYCE = np.array([float(row[row_index]) for row in xyce_parse[1]])
             if analysis_mode == "ac":
                 if response_mode == "magnitude_db":
+                    Y_ARRAY_FROM_XYCE = _convert_array_to_db(Y_ARRAY_FROM_XYCE)
+            elif analysis_mode == "noise":
+                if response_mode and response_mode.endswith("_db"):
+                    Y_ARRAY_FROM_XYCE = _convert_array_to_db(Y_ARRAY_FROM_XYCE)
+            elif analysis_mode == "noise":
+                if response_mode and response_mode.endswith("_db"):
                     Y_ARRAY_FROM_XYCE = 20.0 * np.log10(np.maximum(Y_ARRAY_FROM_XYCE, 1e-30))
 
             if run_state["first_run"]:
@@ -368,7 +438,7 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
                 # Match AC dB behavior you already have
                 if analysis_mode == "ac" and response_mode == "magnitude_db" and node_name.startswith("VM("):
-                    node_values = 20.0 * np.log10(np.maximum(node_values, 1e-30))
+                    node_values = _convert_array_to_db(node_values)
 
                 # X axis values for masking windows
                 X_vals = X_ARRAY_FROM_XYCE  # already built above

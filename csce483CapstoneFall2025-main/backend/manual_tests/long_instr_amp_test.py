@@ -23,7 +23,7 @@ from math import inf
 from typing import Iterable, Tuple
 
 from backend.netlist_parse import Netlist
-from backend.optimzation_process import optimizeProcess
+from backend.optimization_process import optimizeProcess
 
 
 TARGET_CSV = os.path.join("csv", "instrumentation_amp_slow_target.csv")
