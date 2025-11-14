@@ -28,7 +28,6 @@ class CurveFitSettings(tk.Frame):
         self.y_parameter_expression_var = tk.StringVar()
         self.frames = {}
         self.generated_data = None
-        self.current_noise_settings: Dict[str, Any] = {}
         self.inputs_completed = False
         self.time_tuples_list = []
 
@@ -116,7 +115,7 @@ class CurveFitSettings(tk.Frame):
         self.ac_response_frame.pack_forget()
     
     def custom_x_inputs_are_valid(self, x_start, x_end) -> bool:
-        if self.analysis_type in {"ac", "noise"}:
+        if self.analysis_type == "ac":
             if x_start <= 0:
                 messagebox.showerror("Input Error", "The starting frequency must be greater than 0.")
                 return False
@@ -636,10 +635,6 @@ class CurveFitSettings(tk.Frame):
         if self.y_parameter_dropdown.get():
             if self.inputs_completed_callback:
                 self.inputs_completed_callback("y_param_dropdown_selected", True)
-            if self.analysis_type == "noise" and self.inputs_completed_callback:
-                node_name = self._extract_node_name(self.y_parameter_dropdown.get())
-                if node_name:
-                    self.inputs_completed_callback("noise_output_node", node_name)
 
     def on_ac_response_selected(self, event=None):
         selected_label = self.ac_response_var.get()
@@ -651,12 +646,7 @@ class CurveFitSettings(tk.Frame):
         if self.inputs_completed_callback:
             self.inputs_completed_callback("ac_response_changed", self.ac_response)
 
-    def set_analysis_context(
-        self,
-        analysis_type: str,
-        ac_response: Optional[str] = None,
-        noise_settings: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    def set_analysis_context(self, analysis_type: str, ac_response: Optional[str] = None) -> None:
         self.analysis_type = (analysis_type or "transient").lower()
         if ac_response:
             candidate = ac_response.lower()
@@ -666,23 +656,12 @@ class CurveFitSettings(tk.Frame):
                 self.ac_response = "magnitude"
         else:
             self.ac_response = "magnitude"
-        if noise_settings is not None:
-            self.current_noise_settings = dict(noise_settings)
-        elif self.analysis_type == "noise":
-            self.current_noise_settings = dict(self.controller.get_app_data("noise_settings") or {})
-        else:
-            self.current_noise_settings = {}
         if self.analysis_type == "ac":
             self.x_parameter_var.set("FREQ")
             self.x_param_label.config(text="X Parameter: FREQ")
             self.ac_response_var.set(self.ac_response_options.get(self.ac_response, "Magnitude"))
             self.ac_response_frame.pack(side=tk.LEFT)
             self._update_ac_response_labels()
-        elif self.analysis_type == "noise":
-            self.x_parameter_var.set("FREQ")
-            self.x_param_label.config(text="X Parameter: FREQ")
-            self.y_param_label.config(text="Noise Output Node:")
-            self.ac_response_frame.pack_forget()
         else:
             self.x_parameter_var.set("TIME")
             self.x_param_label.config(text="X Parameter: TIME")
@@ -711,26 +690,13 @@ class CurveFitSettings(tk.Frame):
                 return f"{prefix}({inner})"
         return token.upper()
 
-    def _extract_node_name(self, expression: str) -> str:
-        if not expression:
-            return ""
-        token = expression.strip()
-        match = re.match(r"v\s*\((.+)\)", token, flags=re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
-        return token
-
     def get_settings(self) -> Dict[str, Any]:
         y_display = self.y_parameter_var.get()
         settings = {"curve_file": self.curve_file_path_var.get()}
         settings["x_parameter"] = self.x_parameter_var.get()
         settings["x_parameter_display"] = (
-            "Frequency (Hz)" if self.analysis_type in {"ac", "noise"} else "Time (s)"
+            "Frequency (Hz)" if self.analysis_type == "ac" else "Time (s)"
         )
-        y_display_label = ""
-        y_expression_value = y_display
-        y_units = ""
-        formatted_y_parameter = ""
         if self.analysis_type == "ac":
             if self.ac_response == "magnitude_db":
                 unit_label = "Magnitude (dB)"
@@ -747,33 +713,14 @@ class CurveFitSettings(tk.Frame):
             else:
                 y_display_label = unit_label
             y_units = unit_label
-            formatted_y_parameter = self._format_y_parameter_for_analysis(y_display)
-        elif self.analysis_type == "noise":
-            noise_conf = self.current_noise_settings or self.controller.get_app_data("noise_settings") or {}
-            quantity = (noise_conf.get("quantity") or "onoise").lower()
-            quantity_labels = {
-                "onoise": ("Output noise", "V/√Hz"),
-                "onoise_db": ("Output noise", "dB/√Hz"),
-                "inoise": ("Input-referred noise", "V/√Hz"),
-                "inoise_db": ("Input-referred noise", "dB/√Hz"),
-            }
-            label_text, unit_text = quantity_labels.get(quantity, quantity_labels["onoise"])
-            y_units = f"{label_text} ({unit_text})"
-            y_display_label = y_display or y_units
-            output_node = self._extract_node_name(y_display) or noise_conf.get("output_node", "")
-            y_expression_value = y_display or (f"V({output_node})" if output_node else "")
-            formatted_y_parameter = "INOISE" if quantity.startswith("i") else "ONOISE"
-            settings["noise_output_node"] = output_node
-            settings["noise_quantity"] = quantity
         else:
             y_display_label = y_display or "Voltage"
             y_units = y_display or "Voltage"
-            formatted_y_parameter = self._format_y_parameter_for_analysis(y_display)
         settings["y_parameter_display"] = y_display_label
-        settings["y_parameter_expression"] = y_expression_value
+        settings["y_parameter_expression"] = y_display
         settings["y_units"] = y_units
-        settings["y_parameter"] = formatted_y_parameter
-        settings["ac_response"] = self.ac_response if self.analysis_type == "ac" else None
+        settings["y_parameter"] = self._format_y_parameter_for_analysis(y_display)
+        settings["ac_response"] = self.ac_response
         return settings
 
     def _update_ac_response_labels(self) -> None:

@@ -515,12 +515,8 @@ class OptimizationSummary(tk.Frame):
         self.analysis_type = (self.curveData.get("analysis_type") or "transient").lower()
         self.ac_settings = self.curveData.get("ac_settings") or {}
         self.ac_response = (self.ac_settings.get("response") or "magnitude").lower()
-        self.noise_settings = self.curveData.get("noise_settings") or {}
-        self.noise_quantity = (self.noise_settings.get("quantity") or "onoise").lower()
-        if self.noise_quantity not in {"onoise", "onoise_db", "inoise", "inoise_db"}:
-            self.noise_quantity = "onoise"
         self.x_parameter = self.curveData.get("x_parameter", "TIME")
-        default_x_label = "Frequency (Hz)" if self.analysis_type in {"ac", "noise"} else "Time (s)"
+        default_x_label = "Frequency (Hz)" if self.analysis_type == "ac" else "Time (s)"
         self.x_parameter_display = self.curveData.get("x_parameter_display") or default_x_label
         self.y_parameter_display = (
             self.curveData.get("y_parameter_display")
@@ -543,12 +539,7 @@ class OptimizationSummary(tk.Frame):
                     y_val = float(row[1])
                 except (TypeError, ValueError, IndexError):
                     continue
-                needs_db = (
-                    self.analysis_type == "ac" and self.ac_response == "magnitude_db"
-                ) or (
-                    self.analysis_type == "noise" and self.noise_quantity.endswith("_db")
-                )
-                if needs_db:
+                if self.analysis_type == "ac" and self.ac_response == "magnitude_db":
                     if y_val <= 0:
                         y_val = 1e-30
                     y_val = 20.0 * math.log10(y_val)
@@ -558,12 +549,7 @@ class OptimizationSummary(tk.Frame):
             self.target_x = [row[0] for row in processed_rows]
             self.target_y = [row[1] for row in processed_rows]
             range_y = max(self.target_y) - min(self.target_y)
-            needs_db_margin = (
-                self.analysis_type == "ac" and self.ac_settings.get("response") == "magnitude_db"
-            ) or (
-                self.analysis_type == "noise" and self.noise_quantity.endswith("_db")
-            )
-            default_margin = 5 if needs_db_margin else 1
+            default_margin = 5 if (self.analysis_type == "ac" and self.ac_settings.get("response") == "magnitude_db") else 1
             margin = max(range_y * 0.25, default_margin)
             self.minBound = min(self.target_y) - margin
             self.maxBound = max(self.target_y) + margin
@@ -579,7 +565,7 @@ class OptimizationSummary(tk.Frame):
         # Configure plot styling
         self.ax.set_xlabel(self.x_parameter_display, color=self.COLORS['text_secondary'], fontsize=12)
         self.ax.set_ylabel(self.y_parameter_display, color=self.COLORS['text_secondary'], fontsize=12)
-        if self.analysis_type in {"ac", "noise"}:
+        if self.analysis_type == "ac":
             try:
                 self.ax.set_xscale("log")
             except ValueError:
@@ -764,26 +750,15 @@ class OptimizationSummary(tk.Frame):
             y_data = list(y_raw)
             if analysis_mode:
                 self.analysis_type = analysis_mode
-            current_mode = analysis_mode or self.analysis_type
             if response_mode:
-                if current_mode == "ac":
-                    self.ac_response = response_mode
-                elif current_mode == "noise":
-                    self.noise_quantity = response_mode
+                self.ac_response = response_mode
         else:
-            current_mode = self.analysis_type
-            if current_mode == "ac":
-                response_mode = getattr(self, "ac_response", "magnitude")
-            elif current_mode == "noise":
-                response_mode = getattr(self, "noise_quantity", "onoise")
-            else:
-                response_mode = None
+            analysis_mode = self.analysis_type
+            response_mode = getattr(self, "ac_response", "magnitude")
             y_data = list(data[1])
             x_data = list(data[0])
-        if current_mode == "ac" and response_mode == "magnitude_db":
-            y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
-        elif current_mode == "noise" and response_mode and response_mode.endswith("_db"):
-            y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
+            if analysis_mode == "ac" and response_mode == "magnitude_db":
+                y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
 
         self._latest_simulation = (list(x_data), list(y_data))
         if self._graph_update_counter % 5 == 0 or not self.optimization_active:
@@ -806,7 +781,7 @@ class OptimizationSummary(tk.Frame):
         self.ax.spines['top'].set_color(self.COLORS['border'])
         self.ax.spines['right'].set_color(self.COLORS['border'])
         self.ax.spines['left'].set_color(self.COLORS['border'])
-        if self.analysis_type in {"ac", "noise"}:
+        if self.analysis_type == "ac":
             try:
                 self.ax.set_xscale("log")
             except ValueError:
