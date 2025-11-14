@@ -3,7 +3,7 @@ from tkinter import ttk
 import queue
 import threading as th
 from typing import Optional
-from backend.optimzation_process import optimizeProcess
+from backend.optimization_process import optimizeProcess
 from datetime import datetime
 import math
 import numpy as np
