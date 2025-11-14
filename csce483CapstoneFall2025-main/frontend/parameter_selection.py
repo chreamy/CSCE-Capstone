@@ -25,6 +25,7 @@ class ParameterSelectionWindow(tk.Frame):
         self.available_parameters: List[str] = []
         self.selected_parameters: List[str] = []
         self.nodes: set[str] = set()
+        self.sources: List[str] = []
 
         self.netlist: Netlist = None
 
@@ -170,7 +171,9 @@ class ParameterSelectionWindow(tk.Frame):
                 and getattr(component, "scope", "top") == "top"
             ]
             self.nodes = self.netlist.nodes
+            self.sources = self._extract_source_components()
             self.update_available_listbox()
+            self.controller.update_app_data("source_names", self.sources)
 
         except FileNotFoundError:
             messagebox.showerror("Error", f"Netlist file not found: {netlist_path}")
@@ -240,6 +243,7 @@ class ParameterSelectionWindow(tk.Frame):
     def go_forward(self):
         self.controller.update_app_data("selected_parameters", self.selected_parameters)
         self.controller.update_app_data("nodes", self.nodes)
+        self.controller.update_app_data("source_names", self.sources)
         # Placeholder for now
         self.controller.navigate("optimization_settings")
 
@@ -269,5 +273,22 @@ class ParameterSelectionWindow(tk.Frame):
         self.update_available_listbox()
         self.update_selected_listbox()
         self.continue_button.config(state=tk.DISABLED)
+
+    def _extract_source_components(self) -> List[str]:
+        if not self.netlist:
+            return []
+        names = []
+        for component in self.netlist.components:
+            comp_type = getattr(component, "type", "").upper()
+            if comp_type in {"V", "I"}:
+                names.append(component.name)
+        # Preserve original order but drop duplicates
+        seen = set()
+        ordered = []
+        for name in names:
+            if name not in seen:
+                seen.add(name)
+                ordered.append(name)
+        return ordered
 
 
