@@ -26,6 +26,7 @@ class AppController:
             "selected_parameters": [],
             "optimization_settings": {},
             "nodes": set(),
+            "source_names": [],
             "optimization_results": [],
             "netlist_object": None,
             "generated_data": [],
@@ -36,6 +37,15 @@ class AppController:
                 "start_frequency": 1.0,
                 "stop_frequency": 1e6,
                 "response": "magnitude",
+            },
+            "noise_settings": {
+                "sweep_type": "DEC",
+                "points": 10,
+                "start_frequency": 1.0,
+                "stop_frequency": 1e6,
+                "output_node": "",
+                "input_source": "",
+                "quantity": "onoise",
             },
         }
         self.show_netlist_uploader()  # Start with the first window

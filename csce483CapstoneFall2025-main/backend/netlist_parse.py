@@ -211,7 +211,7 @@ class Netlist:
                 if not tokens:
                     continue
                 keyword = tokens[0].upper()
-                if keyword in {".TRAN", ".AC"}:
+                if keyword in {".TRAN", ".AC", ".NOISE"}:
                     print("tran command detected already. Removing from copy...")
                     continue
                 if keyword == ".PRINT":
@@ -238,6 +238,76 @@ class Netlist:
         except Exception as exc:
             print("An error occurred: %s" % exc)
 
+    def writeNoiseCmdsToFile(
+        self,
+        file_path,
+        sweep_type,
+        points_per_interval,
+        start_frequency,
+        stop_frequency,
+        output_expression,
+        input_source,
+    ):
+        try:
+            with open(file_path, "r") as file:
+                data = file.readlines()
+
+            filtered_lines = []
+            for line in data:
+                tokens = line.strip().split()
+                if not tokens:
+                    continue
+                keyword = tokens[0].upper()
+                if keyword in {".NOISE", ".AC", ".TRAN"}:
+                    print("analysis command detected already. Removing from copy...")
+                    continue
+                if keyword == ".PRINT":
+                    print("print command detected already Removing from copy...")
+                    continue
+                filtered_lines.append(line)
+
+            def _format_number(value):
+                if isinstance(value, (int, float)):
+                    return f"{value:.6g}"
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if stripped:
+                        return stripped
+                return "0"
+
+            sweep = (sweep_type or "DEC").upper()
+            if sweep not in {"DEC", "LIN", "OCT"}:
+                sweep = "DEC"
+            try:
+                points_value = int(float(points_per_interval))
+            except (TypeError, ValueError):
+                points_value = 10
+            start_literal = _format_number(start_frequency)
+            stop_literal = _format_number(stop_frequency)
+
+            output_expr = (output_expression or "").strip()
+            if not output_expr:
+                raise ValueError("Noise analysis requires an output expression.")
+            source_name = (input_source or "").strip()
+            if not source_name:
+                raise ValueError("Noise analysis requires an input source.")
+
+            noise_command_string = (
+                f".NOISE {output_expr} {source_name} {sweep} {points_value} {start_literal} {stop_literal}\n"
+            )
+            print_command_string = ".PRINT NOISE FREQ ONOISE INOISE\n"
+
+            insertion_index = self._find_analysis_insert_index(filtered_lines)
+            filtered_lines.insert(insertion_index, noise_command_string)
+            filtered_lines.insert(insertion_index + 1, print_command_string)
+
+            with open(file_path, "w") as file:
+                file.writelines(filtered_lines)
+        except FileNotFoundError:
+            print("Error: The file '%s' was not found." % file_path)
+        except Exception as exc:
+            print("An error occurred: %s" % exc)
+
     def writeAcCmdsToFile(self, file_path, sweep_type, points_per_interval, start_frequency, stop_frequency, print_variables):
         try:
             with open(file_path, "r") as file:
@@ -249,7 +319,7 @@ class Netlist:
                 if not tokens:
                     continue
                 keyword = tokens[0].upper()
-                if keyword in {".AC", ".TRAN"}:
+                if keyword in {".AC", ".TRAN", ".NOISE"}:
                     print("analysis command detected already. Removing from copy...")
                     continue
                 if keyword == ".PRINT":

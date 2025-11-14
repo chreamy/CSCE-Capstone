@@ -7,6 +7,7 @@ from .edit_constraint_dialog import EditConstraintDialog
 from .constraint_table import ConstraintTable
 from .curve_fit_settings import CurveFitSettings
 from .ac_settings_dialog import AcSettingsDialog
+from .noise_settings_dialog import NoiseSettingsDialog
 from ..utils import import_constraints_from_file, export_constraints_to_file
 from ..ui_theme import (
     COLORS,
@@ -44,6 +45,8 @@ class OptimizationSettingsWindow(tk.Frame):
             self.controller.get_app_data("analysis_type") or "transient"
         ).lower()
         stored_ac_settings = self.controller.get_app_data("ac_settings") or {}
+        stored_noise_settings = self.controller.get_app_data("noise_settings") or {}
+        self.source_names = list(self.controller.get_app_data("source_names") or [])
         def _as_float(value, default):
             try:
                 return float(value)
@@ -55,7 +58,19 @@ class OptimizationSettingsWindow(tk.Frame):
                 return int(float(value))
             except (TypeError, ValueError):
                 return default
-        self.analysis_type = "ac" if stored_analysis_type == "ac" else "transient"
+
+        def _as_str(value, default=""):
+            if value is None:
+                return default
+            text = str(value).strip()
+            return text if text else default
+
+        if stored_analysis_type == "ac":
+            self.analysis_type = "ac"
+        elif stored_analysis_type == "noise":
+            self.analysis_type = "noise"
+        else:
+            self.analysis_type = "transient"
         self.ac_settings = {
             "sweep_type": str(stored_ac_settings.get("sweep_type", "DEC")).upper(),
             "points": _as_int(stored_ac_settings.get("points"), 10),
@@ -63,6 +78,17 @@ class OptimizationSettingsWindow(tk.Frame):
             "stop_frequency": _as_float(stored_ac_settings.get("stop_frequency"), 1_000_000.0),
             "response": str(stored_ac_settings.get("response", "magnitude")).lower(),
         }
+        self.noise_settings = {
+            "sweep_type": str(stored_noise_settings.get("sweep_type", "DEC")).upper(),
+            "points": _as_int(stored_noise_settings.get("points"), 10),
+            "start_frequency": _as_float(stored_noise_settings.get("start_frequency"), 1.0),
+            "stop_frequency": _as_float(stored_noise_settings.get("stop_frequency"), 1_000_000.0),
+            "output_node": _as_str(stored_noise_settings.get("output_node")),
+            "input_source": _as_str(stored_noise_settings.get("input_source")),
+            "quantity": str(stored_noise_settings.get("quantity", "onoise")).lower(),
+        }
+        if self.noise_settings["quantity"] not in {"onoise", "onoise_db", "inoise", "inoise_db"}:
+            self.noise_settings["quantity"] = "onoise"
 
         # --- Now build the lists ---
         self.node_voltage_expressions = [
@@ -73,7 +99,16 @@ class OptimizationSettingsWindow(tk.Frame):
         self.allowed_constraint_left_sides: List[str] = (
             self.selected_parameters + self.node_voltage_expressions
         )
-        self.allowed_constraint_left_sides.sort()
+        if self.analysis_type == "noise":
+            self.allowed_constraint_left_sides.extend(["ONOISE", "INOISE"])
+        deduped = []
+        seen_ct = set()
+        for item in self.allowed_constraint_left_sides:
+            if item in seen_ct:
+                continue
+            seen_ct.add(item)
+            deduped.append(item)
+        self.allowed_constraint_left_sides = sorted(deduped)
 
         # --- Continue with other initializations ---
         self.constraints: List[Dict[str, str]] = []
@@ -166,12 +201,17 @@ class OptimizationSettingsWindow(tk.Frame):
         ttk.Label(analysis_type_frame, text="Analysis Type:").pack(
             side=tk.LEFT, anchor=tk.W, pady=5
         )
-        initial_analysis_label = "AC" if self.analysis_type == "ac" else "Transient"
+        if self.analysis_type == "ac":
+            initial_analysis_label = "AC"
+        elif self.analysis_type == "noise":
+            initial_analysis_label = "Noise"
+        else:
+            initial_analysis_label = "Transient"
         self.analysis_type_var = tk.StringVar(value=initial_analysis_label)
         analysis_type_dropdown = ttk.Combobox(
             analysis_type_frame,
             textvariable=self.analysis_type_var,
-            values=["Transient", "AC"],
+            values=["Transient", "AC", "Noise"],
             state="readonly",
             width=12,
         )
@@ -190,6 +230,18 @@ class OptimizationSettingsWindow(tk.Frame):
         )
         self.ac_summary_label.pack(side=tk.LEFT, anchor=tk.W, padx=5)
 
+        self.noise_config_button = create_secondary_button(
+            analysis_type_frame,
+            text="Configure Noise Sweep...",
+            command=self.open_noise_settings,
+        )
+        self.noise_summary_var = tk.StringVar(value="")
+        self.noise_details_frame = ttk.Frame(main_frame)
+        self.noise_summary_label = ttk.Label(
+            self.noise_details_frame, textvariable=self.noise_summary_var
+        )
+        self.noise_summary_label.pack(side=tk.LEFT, anchor=tk.W, padx=5)
+
         # # --- Settings Panels (Curve Fit) ---
         setting_panel_frame = ttk.Frame(main_frame)
         # Pack this frame where the settings should appear
@@ -205,14 +257,18 @@ class OptimizationSettingsWindow(tk.Frame):
             inputs_completed_callback=self.handle_curve_fit_conditions,  # Keep this callback
         )
         self.curve_fit_settings.set_analysis_context(
-            self.analysis_type, self.ac_settings.get("response", "magnitude")
+            self.analysis_type,
+            self.ac_settings.get("response", "magnitude"),
+            noise_settings=self.noise_settings,
         )
         # Pack the CurveFitSettings panel so it's visible
         self.curve_fit_settings.pack(fill=tk.X)
         self._update_ac_summary()
+        self._update_noise_summary()
         self._update_analysis_ui()
         self.controller.update_app_data("analysis_type", self.analysis_type)
         self.controller.update_app_data("ac_settings", self.ac_settings)
+        self.controller.update_app_data("noise_settings", self.noise_settings)
 
         # --- Constraints Table ---
         constraints_frame = ttk.Frame(main_frame)
@@ -373,6 +429,10 @@ class OptimizationSettingsWindow(tk.Frame):
             self.ac_settings["response"] = state
             self.controller.update_app_data("ac_settings", self.ac_settings)
             self._update_ac_summary()
+        elif condition_type == "noise_output_node":
+            self.noise_settings["output_node"] = state or ""
+            self.controller.update_app_data("noise_settings", self.noise_settings)
+            self._update_noise_summary()
 
         # Check if all conditions are met
         self.update_continue_button_state()
@@ -405,18 +465,59 @@ class OptimizationSettingsWindow(tk.Frame):
         )
         self.ac_summary_var.set(summary)
 
+    def _update_noise_summary(self) -> None:
+        if not self.noise_settings or self.analysis_type != "noise":
+            self.noise_summary_var.set("")
+            return
+        quantity_map = {
+            "onoise": "Output noise (V/√Hz)",
+            "onoise_db": "Output noise (dB/√Hz)",
+            "inoise": "Input-referred noise (V/√Hz)",
+            "inoise_db": "Input-referred noise (dB/√Hz)",
+        }
+        quantity = self.noise_settings.get("quantity", "onoise").lower()
+        quantity_label = quantity_map.get(quantity, quantity_map["onoise"])
+        summary = (
+            f"{self.noise_settings['sweep_type']} sweep, "
+            f"{self.noise_settings['points']} points, "
+            f"{self.noise_settings['start_frequency']:.3g} -> "
+            f"{self.noise_settings['stop_frequency']:.3g} Hz, "
+            f"{quantity_label}"
+        )
+        node = self.noise_settings.get("output_node")
+        source = self.noise_settings.get("input_source")
+        if node or source:
+            summary += f" (node {node or '?'} vs source {source or '?'})"
+        self.noise_summary_var.set(summary)
+
     def _update_analysis_ui(self) -> None:
-        is_ac = self.analysis_type == "ac"
-        if is_ac:
+        if self.analysis_type == "ac":
             if not self.ac_config_button.winfo_ismapped():
                 self.ac_config_button.pack(side=tk.LEFT, pady=5)
             if not self.ac_details_frame.winfo_ismapped():
                 self.ac_details_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 5))
+            if self.noise_config_button.winfo_ismapped():
+                self.noise_config_button.pack_forget()
+            if self.noise_details_frame.winfo_ismapped():
+                self.noise_details_frame.pack_forget()
+        elif self.analysis_type == "noise":
+            if self.ac_config_button.winfo_ismapped():
+                self.ac_config_button.pack_forget()
+            if self.ac_details_frame.winfo_ismapped():
+                self.ac_details_frame.pack_forget()
+            if not self.noise_config_button.winfo_ismapped():
+                self.noise_config_button.pack(side=tk.LEFT, pady=5)
+            if not self.noise_details_frame.winfo_ismapped():
+                self.noise_details_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 5))
         else:
             if self.ac_config_button.winfo_ismapped():
                 self.ac_config_button.pack_forget()
             if self.ac_details_frame.winfo_ismapped():
                 self.ac_details_frame.pack_forget()
+            if self.noise_config_button.winfo_ismapped():
+                self.noise_config_button.pack_forget()
+            if self.noise_details_frame.winfo_ismapped():
+                self.noise_details_frame.pack_forget()
 
     def open_ac_settings(self):
         dialog = AcSettingsDialog(self, self.ac_settings)
@@ -427,7 +528,28 @@ class OptimizationSettingsWindow(tk.Frame):
             self._update_ac_summary()
             self._update_analysis_ui()
             self.curve_fit_settings.set_analysis_context(
-                self.analysis_type, self.ac_settings.get("response", "magnitude")
+                self.analysis_type,
+                self.ac_settings.get("response", "magnitude"),
+                noise_settings=self.noise_settings,
+            )
+
+    def open_noise_settings(self):
+        dialog = NoiseSettingsDialog(
+            self,
+            sorted(self.nodes),
+            self.source_names,
+            self.noise_settings,
+        )
+        self.wait_window(dialog)
+        if dialog.result:
+            self.noise_settings.update(dialog.result)
+            self.controller.update_app_data("noise_settings", self.noise_settings)
+            self._update_noise_summary()
+            self._update_analysis_ui()
+            self.curve_fit_settings.set_analysis_context(
+                self.analysis_type,
+                self.ac_settings.get("response", "magnitude"),
+                noise_settings=self.noise_settings,
             )
 
     def on_optimization_type_change(self, event=None):
@@ -435,11 +557,19 @@ class OptimizationSettingsWindow(tk.Frame):
 
     def on_analysis_type_change(self, event=None):
         selection = (self.analysis_type_var.get() or "Transient").strip().lower()
-        self.analysis_type = "ac" if selection == "ac" else "transient"
+        if selection == "ac":
+            self.analysis_type = "ac"
+        elif selection == "noise":
+            self.analysis_type = "noise"
+        else:
+            self.analysis_type = "transient"
         self.controller.update_app_data("analysis_type", self.analysis_type)
         self.controller.update_app_data("ac_settings", self.ac_settings)
+        self.controller.update_app_data("noise_settings", self.noise_settings)
         self.curve_fit_settings.set_analysis_context(
-            self.analysis_type, self.ac_settings.get("response", "magnitude")
+            self.analysis_type,
+            self.ac_settings.get("response", "magnitude"),
+            noise_settings=self.noise_settings,
         )
         self._update_analysis_ui()
 
@@ -584,6 +714,8 @@ class OptimizationSettingsWindow(tk.Frame):
             "constraints": self.constraints,
         }
         curve_settings = self.curve_fit_settings.get_settings()
+        noise_output_node = curve_settings.pop("noise_output_node", None)
+        noise_quantity = curve_settings.get("noise_quantity")
         ac_response = curve_settings.get("ac_response")
         optimization_settings.update(curve_settings)
         optimization_settings["analysis_type"] = self.analysis_type
@@ -591,13 +723,35 @@ class OptimizationSettingsWindow(tk.Frame):
             if ac_response:
                 self.ac_settings["response"] = ac_response
             optimization_settings["ac_settings"] = dict(self.ac_settings)
+            optimization_settings["noise_settings"] = {}
+        elif self.analysis_type == "noise":
+            if noise_output_node:
+                self.noise_settings["output_node"] = noise_output_node
+            if noise_quantity:
+                self.noise_settings["quantity"] = noise_quantity
+            if not self.noise_settings.get("output_node"):
+                messagebox.showerror(
+                    "Noise Output Required",
+                    "Select the node where noise will be measured before running optimization.",
+                )
+                return
+            if not self.noise_settings.get("input_source"):
+                messagebox.showerror(
+                    "Noise Source Required",
+                    "Configure the noise analysis to choose a driving source.",
+                )
+                return
+            optimization_settings["ac_settings"] = {}
+            optimization_settings["noise_settings"] = dict(self.noise_settings)
         else:
             optimization_settings["ac_settings"] = {}
+            optimization_settings["noise_settings"] = {}
 
         print("AC settings before run:", optimization_settings.get("ac_settings"))
 
         self.controller.update_app_data("analysis_type", self.analysis_type)
         self.controller.update_app_data("ac_settings", self.ac_settings)
+        self.controller.update_app_data("noise_settings", self.noise_settings)
 
         self.controller.update_app_data("optimization_settings", optimization_settings)
         self.controller.update_app_data(

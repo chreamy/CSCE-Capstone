@@ -81,7 +81,22 @@ node_constraints = {
     'V(3)': (1.0, None)   # Example: V(3) must be >= 1V
 }
 """
-def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netlist, writable_netlist_path: str, node_constraints: dict, equality_part_constraints: list, queue, custom_xtol=1e-12, custom_gtol=1e-12, custom_ftol=1e-12, analysis_type="transient", x_parameter="TIME", ac_response="magnitude") -> None:
+def curvefit_optimize(
+    target_value: str,
+    target_curve_rows: list,
+    netlist: Netlist,
+    writable_netlist_path: str,
+    node_constraints: dict,
+    equality_part_constraints: list,
+    queue,
+    custom_xtol=1e-12,
+    custom_gtol=1e-12,
+    custom_ftol=1e-12,
+    analysis_type="transient",
+    x_parameter="TIME",
+    ac_response="magnitude",
+    noise_settings=None,
+) -> None:
     # Get the session log file path
     session_log_file = get_session_log_file()
     
@@ -97,7 +112,18 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
         "real": "real",
         "imag": "imag",
     }
-    response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
+    noise_settings = noise_settings or {}
+    valid_noise_quantities = {"onoise", "onoise_db", "inoise", "inoise_db"}
+    noise_quantity = (noise_settings.get("quantity") or "onoise")
+    noise_quantity = str(noise_quantity).strip().lower()
+    if noise_quantity not in valid_noise_quantities:
+        noise_quantity = "onoise"
+
+    response_mode = None
+    if analysis_mode == "ac":
+        response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
+    elif analysis_mode == "noise":
+        response_mode = noise_quantity
 
     # Initialize log file with session header
     session_start_time = datetime.now()
@@ -118,6 +144,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             "imag": "imag",
         }.get(response_mode, response_mode)
         log_to_file(f"AC response: {response_label}", session_log_file)
+    elif analysis_mode == "noise":
+        log_to_file(f"Noise quantity: {noise_quantity}", session_log_file)
     log_to_file(f"Optimization parameters:", session_log_file)
     log_to_file(f"  xtol: {custom_xtol}", session_log_file)
     log_to_file(f"  gtol: {custom_gtol}", session_log_file)
@@ -135,6 +163,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
     queue.put(("Log", f"X-axis variable: {x_axis_identifier}"))
     if analysis_mode == "ac":
         queue.put(("Log", f"AC response: {response_label}"))
+    elif analysis_mode == "noise":
+        queue.put(("Log", f"Noise quantity: {noise_quantity}"))
     queue.put(("Log", f"Optimization parameters:"))
     queue.put(("Log", f"  xtol: {custom_xtol}"))
     queue.put(("Log", f"  gtol: {custom_gtol}"))
@@ -179,6 +209,8 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
         output_suffixes = [".prn"]
         if analysis_mode == "ac":
             output_suffixes = [".FD.prn"] + output_suffixes
+        elif analysis_mode == "noise":
+            output_suffixes = [".NOISE.prn", ".NOISE0.prn", ".FD.prn"] + output_suffixes
 
         def _remove_old_outputs(base_path: str) -> None:
             for suffix in output_suffixes:
@@ -350,6 +382,9 @@ def curvefit_optimize(target_value: str, target_curve_rows: list, netlist: Netli
             Y_ARRAY_FROM_XYCE = np.array([float(row[row_index]) for row in xyce_parse[1]])
             if analysis_mode == "ac":
                 if response_mode == "magnitude_db":
+                    Y_ARRAY_FROM_XYCE = 20.0 * np.log10(np.maximum(Y_ARRAY_FROM_XYCE, 1e-30))
+            elif analysis_mode == "noise":
+                if response_mode and response_mode.endswith("_db"):
                     Y_ARRAY_FROM_XYCE = 20.0 * np.log10(np.maximum(Y_ARRAY_FROM_XYCE, 1e-30))
 
             if run_state["first_run"]:
