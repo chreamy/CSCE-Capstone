@@ -13,6 +13,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from .ui_theme import COLORS as THEME_COLORS, apply_modern_theme
 
+_DB_FLOOR = 1e-30
+
+
+def _safe_to_db(value: float) -> float:
+    """Convert a scalar to dB with a floor to avoid log10(0)."""
+    return 20.0 * math.log10(max(value, _DB_FLOOR))
+
 
 class OptimizationSummary(tk.Frame):
     COLORS = THEME_COLORS
@@ -31,24 +38,10 @@ class OptimizationSummary(tk.Frame):
         self.optimization_active = False
         self.sidebar_visible = False
         self.realtime_logs = []
-        self.convergence_window = tk.Toplevel(self.parent)
-        self.convergence_window.title("Convergence")
-        self.convergence_window.geometry("240x150")
-        self.convergence_window.transient(self.parent)
-        self.convergence_window.resizable(False, False)
-        self.convergence_label = tk.Label(
-            self.convergence_window,
-            text="Convergence: -- %",
-            font=("Segoe UI", 12)
-        )
-        self.convergence_label.pack(padx=20, pady=(18, 5))
-        self.error_label = tk.Label(
-            self.convergence_window,
-            text="Max Error: --\nRMS Error: --",
-            font=("Segoe UI", 11)
-        )
-        self.error_label.pack(padx=20, pady=(0, 12))
-        self.convergence_window.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.convergence_window = None
+        self.convergence_label = None
+        self.error_label = None
+        self._create_convergence_window()
         self._graph_update_counter = 0
         self._message_batch_limit = 40
         self._initial_cost: Optional[float] = None
@@ -74,6 +67,55 @@ class OptimizationSummary(tk.Frame):
         
         # Bind window resize event to maintain proper layout
         self.parent.bind('<Configure>', self._on_window_resize)
+
+    def _create_convergence_window(self) -> None:
+        """Create the floating window that displays convergence stats."""
+        self._destroy_convergence_window()
+        window = tk.Toplevel(self.parent)
+        window.title("Convergence")
+        window.geometry("240x150")
+        window.transient(self.parent)
+        window.resizable(False, False)
+        self.convergence_window = window
+        self.convergence_label = tk.Label(
+            window,
+            text="Convergence: -- %",
+            font=("Segoe UI", 12),
+        )
+        self.convergence_label.pack(padx=20, pady=(18, 5))
+        self.error_label = tk.Label(
+            window,
+            text="Max Error: --\nRMS Error: --",
+            font=("Segoe UI", 11),
+        )
+        self.error_label.pack(padx=20, pady=(0, 12))
+        window.protocol("WM_DELETE_WINDOW", self._on_convergence_window_close)
+
+    def _on_convergence_window_close(self) -> None:
+        """Handle attempts to close the convergence window."""
+        self._destroy_convergence_window()
+
+    def _destroy_convergence_window(self) -> None:
+        """Destroy the convergence window and clear related widgets."""
+        window = getattr(self, "convergence_window", None)
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+        self.convergence_window = None
+        self.convergence_label = None
+        self.error_label = None
+
+    def _ensure_convergence_window(self) -> None:
+        """Show the convergence window, recreating it if needed."""
+        if getattr(self, "convergence_window", None) is None:
+            self._create_convergence_window()
+        else:
+            try:
+                self.convergence_window.deiconify()
+            except Exception:
+                self._create_convergence_window()
 
     def _create_main_layout(self):
         """Create the main layout container"""
@@ -549,9 +591,7 @@ class OptimizationSummary(tk.Frame):
                     self.analysis_type == "noise" and self.noise_quantity.endswith("_db")
                 )
                 if needs_db:
-                    if y_val <= 0:
-                        y_val = 1e-30
-                    y_val = 20.0 * math.log10(y_val)
+                    y_val = _safe_to_db(y_val)
                 processed_rows.append([x_val, y_val])
 
         if processed_rows:
@@ -613,6 +653,7 @@ class OptimizationSummary(tk.Frame):
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
     def start_optimization(self) -> None:
+        self._ensure_convergence_window()
         if getattr(self, "convergence_label", None):
             self.convergence_label.config(text="Convergence: -- %")
         self._initial_cost = None
@@ -675,11 +716,13 @@ class OptimizationSummary(tk.Frame):
 
     def return_to_settings(self) -> None:
         self._cleanup_worker()
+        self._destroy_convergence_window()
         self.controller.navigate("optimization_settings")
 
     def restart_optimization(self) -> None:
         """Restart from netlist upload step"""
         self._cleanup_worker()
+        self._destroy_convergence_window()
         # Navigate back to netlist uploader to start fresh
         self.controller.navigate("netlist_uploader")
 
@@ -781,9 +824,9 @@ class OptimizationSummary(tk.Frame):
             y_data = list(data[1])
             x_data = list(data[0])
         if current_mode == "ac" and response_mode == "magnitude_db":
-            y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
+            y_data = [_safe_to_db(val) for val in y_data]
         elif current_mode == "noise" and response_mode and response_mode.endswith("_db"):
-            y_data = [20.0 * math.log10(max(val, 1e-30)) for val in y_data]
+            y_data = [_safe_to_db(val) for val in y_data]
 
         self._latest_simulation = (list(x_data), list(y_data))
         if self._graph_update_counter % 5 == 0 or not self.optimization_active:
@@ -815,10 +858,5 @@ class OptimizationSummary(tk.Frame):
         self.canvas.draw()
 
     def close_window(self) -> None:
-        try:
-            if getattr(self, "convergence_window", None):
-                self.convergence_window.destroy()
-                self.convergence_window = None
-        except Exception:
-            pass
+        self._destroy_convergence_window()
         self.parent.quit()

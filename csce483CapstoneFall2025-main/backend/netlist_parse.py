@@ -276,15 +276,6 @@ class Netlist:
                     continue
                 filtered_lines.append(line)
 
-            def _format_number(value):
-                if isinstance(value, (int, float)):
-                    return f"{value:.6g}"
-                if isinstance(value, str):
-                    stripped = value.strip()
-                    if stripped:
-                        return stripped
-                return "0"
-
             sweep = (sweep_type or "DEC").upper()
             if sweep not in {"DEC", "LIN", "OCT"}:
                 sweep = "DEC"
@@ -292,8 +283,8 @@ class Netlist:
                 points_value = int(float(points_per_interval))
             except (TypeError, ValueError):
                 points_value = 10
-            start_literal = _format_number(start_frequency)
-            stop_literal = _format_number(stop_frequency)
+            start_literal = self._format_literal(start_frequency)
+            stop_literal = self._format_literal(stop_frequency)
 
             output_expr = (output_expression or "").strip()
             if not output_expr:
@@ -337,15 +328,6 @@ class Netlist:
                     continue
                 filtered_lines.append(line)
 
-            def _format_number(value):
-                if isinstance(value, (int, float)):
-                    return f"{value:.6g}"
-                if isinstance(value, str):
-                    stripped = value.strip()
-                    if stripped:
-                        return stripped
-                return "0"
-
             sweep = (sweep_type or "DEC").upper()
             if sweep not in {"DEC", "LIN", "OCT"}:
                 sweep = "DEC"
@@ -353,8 +335,8 @@ class Netlist:
                 points_value = int(float(points_per_interval))
             except (TypeError, ValueError):
                 points_value = 10
-            start_literal = _format_number(start_frequency)
-            stop_literal = _format_number(stop_frequency)
+            start_literal = self._format_literal(start_frequency)
+            stop_literal = self._format_literal(stop_frequency)
 
             ac_command_string = f".AC {sweep} {points_value} {start_literal} {stop_literal}\n"
 
@@ -511,6 +493,16 @@ class Netlist:
         if lower in mapping:
             return mapping[lower]
         return None
+
+    def _format_literal(self, value):
+        """Format numbers/strings for control statements."""
+        if isinstance(value, (int, float)):
+            return f"{value:.6g}"
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+        return "0"
 
     def _find_analysis_insert_index(self, lines):
         subckt_depth = 0

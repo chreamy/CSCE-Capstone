@@ -99,8 +99,6 @@ class OptimizationSettingsWindow(tk.Frame):
         self.allowed_constraint_left_sides: List[str] = (
             self.selected_parameters + self.node_voltage_expressions
         )
-        if self.analysis_type == "noise":
-            self.allowed_constraint_left_sides.extend(["ONOISE", "INOISE"])
         deduped = []
         seen_ct = set()
         for item in self.allowed_constraint_left_sides:
