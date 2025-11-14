@@ -681,7 +681,7 @@ class CurveFitSettings(tk.Frame):
         elif self.analysis_type == "noise":
             self.x_parameter_var.set("FREQ")
             self.x_param_label.config(text="X Parameter: FREQ")
-            self.y_param_label.config(text="Noise Output Node:")
+            self.y_param_label.config(text="Noise Output Node (Y Parameter):")
             self.ac_response_frame.pack_forget()
         else:
             self.x_parameter_var.set("TIME")

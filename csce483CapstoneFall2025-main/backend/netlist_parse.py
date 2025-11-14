@@ -117,6 +117,16 @@ class Netlist:
                         raw_value=tokens[3],
                         scope=scope,
                     ))
+                elif leading_char in {"V", "I"}:
+                    raw_value = tokens[3] if len(tokens) >= 4 else tokens[-1]
+                    converted_value = self._convert_value(raw_value, parameter_values)
+                    components.append(Component(
+                        name=tokens[0],
+                        type=leading_char,
+                        value=converted_value if converted_value is not None else 0.0,
+                        raw_value=raw_value,
+                        scope=scope,
+                    ))
                 if len(tokens) >= 3:
                     nodes.add(tokens[1])
                     nodes.add(tokens[2])
