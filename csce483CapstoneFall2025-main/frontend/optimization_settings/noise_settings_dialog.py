@@ -213,6 +213,14 @@ class NoiseSettingsDialog(tk.Toplevel):
         if stop_freq <= start_freq:
             messagebox.showerror("Invalid Sweep", "Stop frequency must be greater than start frequency.")
             return
+        # Ensure the frequency range is not too small
+        MIN_FREQ_DIFF = 1e-9
+        if (stop_freq - start_freq) < MIN_FREQ_DIFF:
+            messagebox.showerror(
+                "Invalid Sweep",
+                f"Stop frequency and start frequency are too close. Please ensure they differ by at least {MIN_FREQ_DIFF}."
+            )
+            return
 
         sweep = (self.sweep_var.get() or "DEC").upper()
         if sweep not in {"DEC", "LIN", "OCT"}:
