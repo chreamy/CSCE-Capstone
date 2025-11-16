@@ -241,8 +241,6 @@ def curvefit_optimize(
                 # Noise analyses can also reuse AC data, so check for .FD outputs too
                 ".FD.prn",
             ] + output_suffixes
-        elif analysis_mode == "noise":
-            output_suffixes = [".NOISE.prn", ".NOISE0.prn", ".FD.prn"] + output_suffixes
 
         def _remove_old_outputs(base_path: str) -> None:
             for suffix in output_suffixes:

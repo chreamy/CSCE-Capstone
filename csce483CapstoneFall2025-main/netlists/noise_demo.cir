@@ -1,0 +1,7 @@
+* Simple RC low-pass with AC source for noise demo
+V1 N001 0 AC 1
+R1 out N001 10k
+C1 out 0 10p
+.noise V(out) V1 dec 10 1 100k
+.backanno
+.end
