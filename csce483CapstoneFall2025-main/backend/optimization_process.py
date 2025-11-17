@@ -134,7 +134,7 @@ def add_node_constraints(constraints, analysis_type="transient", ac_response="ma
     return formatted
 
 
-def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds):
+def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds, xyce_executable_path=None):
     original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
     try:
         constraints = (curveData or {}).get("constraints", [])
@@ -220,7 +220,14 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         x_parameter = str(x_parameter).strip().upper()
 
         session_num = get_current_session_number()
-        session_dir = os.path.join("runs", str(session_num))
+        # Calculate group folder (1-10, 11-20, etc.)
+        group_start = ((session_num - 1) // 10) * 10 + 1
+        group_end = group_start + 9
+        group_folder = f"{group_start}-{group_end}"
+        
+        # Build path: runs/1-10/1/
+        group_dir = os.path.join("runs", group_folder)
+        session_dir = os.path.join(group_dir, str(session_num))
         if not os.path.exists(session_dir):
             os.makedirs(session_dir)
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
@@ -394,6 +401,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             x_parameter=x_parameter,
             ac_response=ac_response,
             noise_settings=noise_settings if analysis_type == "noise" else None,
+            xyce_executable_path=xyce_executable_path,
         )
 
         NETLIST.file_path = ORIG_NETLIST_PATH

@@ -5,6 +5,7 @@ from .optimization_settings.optimization_settings_window import (
     OptimizationSettingsWindow,
 )
 from .optimization_summary import OptimizationSummary
+from .optimization_history import OptimizationHistoryWindow
 from .ui_theme import apply_modern_theme
 from typing import Dict, Any, Optional
 
@@ -63,8 +64,12 @@ class AppController:
         self._show_window(OptimizationSettingsWindow)
 
     def show_optimization_summary(self) -> None:
-        """Displays the optimization settings window."""
+        """Displays the optimization summary window."""
         self._show_window(OptimizationSummary)
+
+    def show_optimization_history(self) -> None:
+        """Displays the optimization history window."""
+        self._show_window(OptimizationHistoryWindow)
 
     def _show_window(self, window_class: type[tk.Frame], **kwargs) -> None:
         """Helper function to display a new window and destroy the old one."""
@@ -84,6 +89,8 @@ class AppController:
             self.show_optimization_settings()
         elif target_window_name == "optimization_summary":
             self.show_optimization_summary()
+        elif target_window_name == "optimization_history":
+            self.show_optimization_history()
 
     def update_app_data(self, key: str, value: Any) -> None:
         """Updates the shared application data."""

@@ -31,6 +31,18 @@ def open_file_dialog() -> Optional[str]:
     return file_path
 
 
+def open_executable_dialog() -> Optional[str]:
+    """Opens a file dialog for the user to select an executable file."""
+    file_path = filedialog.askopenfilename(
+        title="Select Xyce Executable",
+        filetypes=[
+            ("Executable Files", ("*.exe", "*")),
+            ("All Files", "*.*"),
+        ],
+    )
+    return file_path if file_path else None
+
+
 def import_constraints_from_file() -> Optional[List[Dict[str, str]]]:
     """Opens a file dialog to import constraints from a JSON file."""
     file_path = filedialog.askopenfilename(

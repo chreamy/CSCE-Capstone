@@ -63,7 +63,13 @@ class OptimizationSummary(tk.Frame):
         self._build_plot()
         
         self.parent.after(100, self.update_ui)
-        self.start_optimization()
+        
+        # Only start optimization if we don't have existing results (i.e., first time here)
+        if not self.controller.get_app_data("optimization_results"):
+            self.start_optimization()
+        else:
+            # Returning from history - show the existing results
+            self._show_completed_state()
         
         # Bind window resize event to maintain proper layout
         self.parent.bind('<Configure>', self._on_window_resize)
@@ -301,6 +307,22 @@ class OptimizationSummary(tk.Frame):
             cursor="hand2"
         )
         self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # History button
+        self.history_button = tk.Button(
+            self.results_buttons_frame,
+            text="View History",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['bg_tertiary'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.show_history,
+            cursor="hand2"
+        )
+        self.history_button.pack(side=tk.LEFT, padx=(0, 10))
         
         # Close button
         self.close_button = tk.Button(
@@ -554,6 +576,7 @@ class OptimizationSummary(tk.Frame):
         self.selectedParameters = self.controller.get_app_data("selected_parameters")
         self.optimizationTolerances = self.controller.get_app_data("optimization_tolerances")
         self.RLCBounds = self.controller.get_app_data("RLC_bounds")
+        self.xyceExecutablePath = self.controller.get_app_data("xyce_executable_path")
         self.analysis_type = (self.curveData.get("analysis_type") or "transient").lower()
         self.ac_settings = self.curveData.get("ac_settings") or {}
         self.ac_response = (self.ac_settings.get("response") or "magnitude").lower()
@@ -652,6 +675,23 @@ class OptimizationSummary(tk.Frame):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
+    def _show_completed_state(self) -> None:
+        """Show the optimization complete state with existing results"""
+        self.optimization_active = False
+        self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
+        
+        # Get existing results
+        results = self.controller.get_app_data("optimization_results")
+        if results:
+            self._show_results_state(results)
+        
+        # Show restart button
+        self.back_to_settings_button.pack_forget()
+        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Load the final optimized curve if available
+        self._update_target_plot()
+
     def start_optimization(self) -> None:
         self._ensure_convergence_window()
         if getattr(self, "convergence_label", None):
@@ -681,6 +721,7 @@ class OptimizationSummary(tk.Frame):
                 self.selectedParameters,
                 self.optimizationTolerances,
                 self.RLCBounds,
+                self.xyceExecutablePath,
             ),
         )
         self.thread.daemon = True
@@ -856,6 +897,11 @@ class OptimizationSummary(tk.Frame):
                 pass
         
         self.canvas.draw()
+
+    def show_history(self) -> None:
+        """Navigate to history view"""
+        self._destroy_convergence_window()
+        self.controller.navigate("optimization_history")
 
     def close_window(self) -> None:
         self._destroy_convergence_window()

@@ -42,8 +42,16 @@ def get_session_log_file():
     # Find the next available session number
     session_num = 1
     while True:
-        session_dir = os.path.join(runs_dir, str(session_num))
+        # Calculate group folder (1-10, 11-20, etc.)
+        group_start = ((session_num - 1) // 10) * 10 + 1
+        group_end = group_start + 9
+        group_folder = f"{group_start}-{group_end}"
+        
+        # Build path: runs/1-10/1/session.log
+        group_dir = os.path.join(runs_dir, group_folder)
+        session_dir = os.path.join(group_dir, str(session_num))
         log_file = os.path.join(session_dir, "session.log")
+        
         if not os.path.exists(log_file):
             # Create the session directory
             os.makedirs(session_dir, exist_ok=True)
@@ -64,8 +72,16 @@ def get_current_session_number():
     # Find the next available session number
     session_num = 1
     while True:
-        session_dir = os.path.join(runs_dir, str(session_num))
+        # Calculate group folder (1-10, 11-20, etc.)
+        group_start = ((session_num - 1) // 10) * 10 + 1
+        group_end = group_start + 9
+        group_folder = f"{group_start}-{group_end}"
+        
+        # Build path: runs/1-10/1/session.log
+        group_dir = os.path.join(runs_dir, group_folder)
+        session_dir = os.path.join(group_dir, str(session_num))
         log_file = os.path.join(session_dir, "session.log")
+        
         if not os.path.exists(log_file):
             # Create the session directory
             os.makedirs(session_dir, exist_ok=True)
@@ -104,6 +120,7 @@ def curvefit_optimize(
     x_parameter="TIME",
     ac_response="magnitude",
     noise_settings: Optional[Dict[str, Any]] = None,
+    xyce_executable_path: Optional[str] = None,
 ) -> None:
     """
     Run the curve-fitting optimization for the requested analysis mode.
@@ -304,8 +321,9 @@ def curvefit_optimize(
                 log_and_append(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})", run_info, queue, session_log_file)
             
             # Run Xyce with full output capture
+            xyce_command = xyce_executable_path if xyce_executable_path else "Xyce"
             process = subprocess.run(
-                ["Xyce", "-delim", "COMMA", local_netlist_file],
+                [xyce_command, "-delim", "COMMA", local_netlist_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
