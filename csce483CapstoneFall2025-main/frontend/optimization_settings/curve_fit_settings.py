@@ -180,7 +180,7 @@ class CurveFitSettings(tk.Frame):
                 ),
                 on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1),
                 on_save_constraint=self.push_constraint_from_editor,   # keeps working
-                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                axis_labels=self._current_axis_labels(),
                 constraint_left_options=self._constraint_left_options(),
                 current_y_signal=self.y_parameter_var.get() or ""
             )
@@ -251,7 +251,7 @@ class CurveFitSettings(tk.Frame):
                 ),
                 on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1),
                 on_save_constraint=self.push_constraint_from_editor,
-                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                axis_labels=self._current_axis_labels(),
                 constraint_left_options=self._constraint_left_options(),
                 current_y_signal=self.y_parameter_var.get() or ""
             )
@@ -332,7 +332,7 @@ class CurveFitSettings(tk.Frame):
                 list(self._pwl_points_buffer),
                 on_change=_on_change,
                 on_save_constraint=self.push_constraint_from_editor,
-                axis_labels=(self.x_parameter_var.get(), self.y_parameter_var.get() or "VALUE"),
+                axis_labels=self._current_axis_labels(),
                 constraint_left_options=self._constraint_left_options(),
                 current_y_signal=self.y_parameter_var.get() or ""
             )
@@ -520,7 +520,18 @@ class CurveFitSettings(tk.Frame):
                 curr_range = (xa, xb)
                 x0, x1 = xa, xb
                 self._rebuild_all_line_segments()
-            open_line_editor(self, slope, yint, x0, x1, _apply)
+            open_line_editor(
+                self,
+                slope,
+                yint,
+                x0,
+                x1,
+                on_change=_apply,
+                on_save_constraint=self.push_constraint_from_editor,
+                axis_labels=self._current_axis_labels(),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
+            )
         elif item["type"] == "HEAVISIDE":
             amp, x0, x1 = item["params"]
             curr_range = (x0, x1)
@@ -551,7 +562,17 @@ class CurveFitSettings(tk.Frame):
                 curr_range = (t0, x1_new)
                 x0, x1 = t0, x1_new
                 self._rebuild_all_line_segments()
-            open_heaviside_editor(self, amp, x0, x1, _apply)
+            open_heaviside_editor(
+                self,
+                amp,
+                x0,
+                x1,
+                on_change=_apply,
+                on_save_constraint=self.push_constraint_from_editor,
+                axis_labels=self._current_axis_labels(),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
+            )
         else:
             pts = item["params"]  # list of (x,y)
             # compute and remember the current x-range for overlap tracking
@@ -600,7 +621,15 @@ class CurveFitSettings(tk.Frame):
                 self._rebuild_all_line_segments()  # ADDED
 
             # Open the PIECEWISE editor with live on_change
-            open_piecewise_editor(self, list(pts), _on_change)
+            open_piecewise_editor(
+                self,
+                list(pts),
+                on_change=_on_change,
+                on_save_constraint=self.push_constraint_from_editor,
+                axis_labels=self._current_axis_labels(),
+                constraint_left_options=self._constraint_left_options(),
+                current_y_signal=self.y_parameter_var.get() or ""
+            )
 
     def select_curve_file_and_process(self):
         file_path = filedialog.askopenfilename(
@@ -823,8 +852,6 @@ class CurveFitSettings(tk.Frame):
                 "Could not locate the optimization window; constraint was not saved.",
             )
 
-
-
     def _constraint_left_options(self):
         """
         Build the 'Left' dropdown options to mirror your Add Constraint dialog.
@@ -834,4 +861,14 @@ class CurveFitSettings(tk.Frame):
         node_vs = [f"V({node})" for node in self.nodes]
         # If your dialog uses a specific ordering, adjust here
         return list(self.parameters) + node_vs
+
+    def _current_axis_labels(self):
+        """
+        Build contextual axis labels for the visual editors based on the current
+        analysis mode and Y-parameter selection so the plots remain self-documenting.
+        """
+        settings_snapshot = self.get_settings()
+        x_label = settings_snapshot.get("x_parameter_display") or self.x_parameter_var.get() or "x"
+        y_label = settings_snapshot.get("y_parameter_display") or self.y_parameter_var.get() or "Value"
+        return (x_label, y_label)
 

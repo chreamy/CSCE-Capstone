@@ -5,6 +5,20 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 
+
+def _apply_axis_labels(ax, axis_labels):
+    """
+    Apply contextual axis labels if provided, otherwise fall back to x/y.
+    """
+    if axis_labels and len(axis_labels) == 2:
+        x_label = axis_labels[0] or "x"
+        y_label = axis_labels[1] or "y"
+    else:
+        x_label = "x"
+        y_label = "y"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
 class LegacyConstraintsBar:
     """
     Matches your 'Add Constraint' dialog:
@@ -149,7 +163,7 @@ def open_line_editor(owner, m_init, b_init, x0_init, x1_init, on_change=None, on
     win.geometry("860x560")
 
     fig = Figure(figsize=(7.8, 4.2))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -181,11 +195,6 @@ def open_line_editor(owner, m_init, b_init, x0_init, x1_init, on_change=None, on
 
     ttk.Button(bar, text="Apply", command=lambda: _apply()).pack(side=tk.RIGHT, padx=8)
 
-    target_signal = None
-    if axis_labels and len(axis_labels) == 2:
-        target_signal = axis_labels[1] or "VALUE"
-    else:
-        target_signal = "VALUE"
 
     # Create the embedded constraints panel
     bar = LegacyConstraintsBar(
@@ -252,7 +261,7 @@ def open_line_editor(owner, m_init, b_init, x0_init, x1_init, on_change=None, on
             xmin, xmax, ymin, ymax = _bounds(x0, x1, m, b)
             ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
 
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+        _apply_axis_labels(ax, axis_labels)
         canvas.draw_idle()
 
         if emit and on_change:
@@ -323,7 +332,7 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
     win.geometry("860x560")
 
     fig = Figure(figsize=(7.8, 4.2))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -350,11 +359,6 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
 
     ttk.Button(bar, text="Apply", command=lambda: _apply()).pack(side=tk.RIGHT, padx=8)
 
-    target_signal = None
-    if axis_labels and len(axis_labels) == 2:
-        target_signal = axis_labels[1] or "VALUE"
-    else:
-        target_signal = "VALUE"
 
     # Create the embedded constraints panel
     bar = LegacyConstraintsBar(
@@ -422,7 +426,7 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
             xmin, xmax, ymin, ymax = _bounds(a, t0, x1)
             ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
 
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+        _apply_axis_labels(ax, axis_labels)
         canvas.draw_idle()
         if emit and on_change:
             on_change(a, t0, x1)
@@ -493,7 +497,7 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
 
     # --- figure & axes
     fig = Figure(figsize=(7.9, 4.3))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -594,7 +598,8 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
         xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
         line_artist.set_data(xs, ys)
         scatter_artist.set_offsets(np.c_[xs, ys])
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+        ax.grid(True)
+        _apply_axis_labels(ax, axis_labels)
         if rescale or autoscale.get():  # NEW
             _set_limits()
         canvas.draw_idle()
