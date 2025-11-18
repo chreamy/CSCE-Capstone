@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, StringVar, BooleanVar
+from tkinter import ttk, StringVar, BooleanVar, simpledialog
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -512,9 +512,6 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     v_y = tk.StringVar(value="")
     e_y = ttk.Entry(bar, width=12, textvariable=v_y); e_y.pack(side=tk.LEFT, padx=(4,10))
 
-    # NEW: explicit Insert (before selected row)
-    ttk.Button(bar, text="Insert", command=lambda: _insert_from_fields(append=False)).pack(side=tk.LEFT, padx=(2,12))  # NEW
-
     # NEW: autoscale toggle + Fit button
     autoscale = tk.BooleanVar(value=True)  # NEW: default ON for PWL
     ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale).pack(side=tk.LEFT, padx=(4,6))  # NEW
@@ -722,6 +719,28 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     # initial draw
     _set_limits()
     _redraw(rescale=False, emit=True, select_idx=0)
+    
+    def _edit_point(idx):
+        if not (0 <= idx < len(pts)):
+            return
+        x_old, y_old = pts[idx]
+        new_x = simpledialog.askfloat("Edit Point", "x value:", parent=win, initialvalue=x_old)
+        if new_x is None:
+            return
+        new_y = simpledialog.askfloat("Edit Point", "y value:", parent=win, initialvalue=y_old)
+        if new_y is None:
+            return
+        pts.pop(idx)  # remove old entry
+        insert_idx = _insert_sorted(new_x, new_y, preferred_index=idx)  # keeps the list x-sorted
+        _redraw(rescale=False, emit=True, select_idx=insert_idx)
+
+    def _on_table_double_click(_event):
+        sel = _selected_index()
+        if sel is not None:
+            _edit_point(sel)
+
+    table.bind("<Double-1>", _on_table_double_click)
+
 
 def _constraint_dict_from_fields(kind, name, y_min, y_max, x0, x1, hard, weight, target_signal):
     c = {

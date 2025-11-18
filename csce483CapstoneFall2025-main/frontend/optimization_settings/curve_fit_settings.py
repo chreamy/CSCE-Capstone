@@ -809,21 +809,19 @@ class CurveFitSettings(tk.Frame):
             messagebox.showerror("Constraint", "From x must be < To x.")
             return
 
-        # Persist in controller app_data (optional, if you track constraints there)
-        store = self.controller.get_app_data("constraints") or []
         row = {"left": left, "operator": op, "right": right, "x_min": x_min, "x_max": x_max}
-        store.append(row)
-        self.controller.update_app_data("constraints", store)
-
-        # Insert into the on-screen table (this is what you were missing)
-        tbl = getattr(self.controller, "constraint_table", None)
-        if tbl is not None and hasattr(tbl, "add_constraint"):
-            tbl.add_constraint(row)  # expects left/operator/right/x_min/x_max
+        # Route through OptimizationSettingsWindow.add_constraint so graph-created
+        # constraints share the exact pipeline (type tagging + storage) as manual entries.
+        opt_window = getattr(self.controller, "current_window", None)
+        add_constraint = getattr(opt_window, "add_constraint", None)
+        if callable(add_constraint):
+            add_constraint(row)
+            messagebox.showinfo("Constraint", "Saved constraint to model.")
         else:
-            # Not fatal, but helpful to know if the table isn't wired yet
-            print("Constraint table not available; saved to app_data only.")
-
-        messagebox.showinfo("Constraint", "Saved constraint to model.")
+            messagebox.showerror(
+                "Constraint",
+                "Could not locate the optimization window; constraint was not saved.",
+            )
 
 
 
