@@ -20,7 +20,9 @@ class EditConstraintDialog(tk.Toplevel):
         node_expressions: List[str],
         constraint: Dict[str, str],
         allowed_left_items: List[str],
+        preview_callback=None,
     ):
+        
         super().__init__(parent)
         apply_modern_theme(self)
         self.configure(bg=COLORS["bg_primary"])
@@ -30,6 +32,7 @@ class EditConstraintDialog(tk.Toplevel):
         self.node_expressions = node_expressions
         self.all_allowed_vars_display = parameters + node_expressions
         self.constraint: Optional[Dict[str, str]] = constraint
+        self.preview_callback = preview_callback
         # Instantiate evaluator with separate lists
         self.evaluator = ExpressionEvaluator(
             parameters=parameters, node_expressions=node_expressions
@@ -119,6 +122,19 @@ class EditConstraintDialog(tk.Toplevel):
         ttk.Entry(right_frame, textvariable=self.right_var, width=22).pack(
             fill=tk.X, pady=(6, 0)
         )
+        if callable(self.preview_callback):
+            try:
+                constraint_snapshot = {
+                    "left": self.left_var.get(),
+                    "operator": self.operator_var.get(),
+                    "right": float(self.right_var.get()),
+                    "x_start": self._parse_float_or_none(self.xmin_var.get()),
+                    "x_end": self._parse_float_or_none(self.xmax_var.get()),
+                }
+            except (TypeError, ValueError):
+                constraint_snapshot = None
+            if constraint_snapshot:
+                self.preview_callback(constraint_snapshot)
 
         # --- OK / Cancel ---
         button_frame = ttk.Frame(self)

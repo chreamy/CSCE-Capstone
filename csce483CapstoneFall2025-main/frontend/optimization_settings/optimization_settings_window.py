@@ -631,6 +631,7 @@ class OptimizationSettingsWindow(tk.Frame):
             self.node_voltage_expressions,
             constraint,
             self.allowed_constraint_left_sides,
+            preview_callback=getattr(self.controller, "constraint_preview", None),
         )
         self.wait_window(dialog)  # Wait for dialog to close
         if dialog.constraint is not None:

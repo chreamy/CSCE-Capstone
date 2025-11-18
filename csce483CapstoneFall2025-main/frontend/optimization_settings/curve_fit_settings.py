@@ -1,6 +1,6 @@
 
 # Visual curve editors (Matplotlib embedded in Tkinter)
-from .visual_curve_editors import open_line_editor, open_heaviside_editor, open_piecewise_editor
+from .visual_curve_editors import open_heaviside_editor, open_piecewise_editor
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -12,7 +12,6 @@ from enum import Enum
 
 
 class input_type(Enum):
-    LINE = 1
     HEAVISIDE = 2
     UPLOAD = 3
     PIECEWISE  = 4
@@ -38,13 +37,17 @@ class CurveFitSettings(tk.Frame):
         ttk.Label(self.select_input_type_frame, text="Target Function Type: ").pack(side=tk.LEFT)
         answer = tk.StringVar()
         self.input_type_options = ttk.Combobox(self.select_input_type_frame, textvariable=answer)
-        self.input_type_options['values'] = ('Line','Heaviside','Upload', 'Piecewise Linear')
+        self.input_type_options['values'] = ('Heaviside','Upload', 'Piecewise Linear')
         self.input_type_options.pack(side=tk.LEFT)
         if self.input_type_options['values']:
             self.input_type_options.current(0)
         self.input_type_options.bind("<<ComboboxSelected>>", lambda event: self.show_frame())
+        
+        self.visual_editor_bar = ttk.Frame(self)
+        self.visual_editor_bar.pack(fill=tk.X, padx=6, pady=(6, 0))
+        self.open_editor_button = ttk.Button(self.visual_editor_bar, text="Open Visual Editor")
+        self.open_editor_button.pack(side=tk.LEFT)
 
-        self.frames['Line'] = self.create_line_frame()
         self.frames['Heaviside'] = self.create_heaviside_frame()
         self.frames['Upload'] = self.create_upload_frame()
         self.frames['Piecewise Linear'] = self.create_piecewise_frame()
@@ -71,6 +74,7 @@ class CurveFitSettings(tk.Frame):
         ttk.Button(btns, text="Delete Selected", command=self.delete_selected_function).pack(fill=tk.X, pady=2)
 
         self.func_model = []  # list of {"type": "...", "params": (...)}
+        self.custom_functions = []
         self.analysis_type = "transient"
         self.ac_response = "magnitude"
         self.ac_response_options = {
@@ -139,7 +143,7 @@ class CurveFitSettings(tk.Frame):
         # Check if two intervals intersect
         start1, end1 = tuple1 
         start2, end2 = tuple2 
-        return start1 <= end2 and start2 <= end1
+        return start1 < end2 and start2 < end1
 
 
     def check_if_in_previous_x_ranges(self, time_tuple) -> bool:
@@ -150,64 +154,6 @@ class CurveFitSettings(tk.Frame):
                 return True # Return True if an intersection is found
         return False # Return False if no intersections are found
         
-    def create_line_frame(self):
-        line_frame = tk.Frame(self.select_input_type_frame)
-        line_frame.pack()
-        tk.Label(line_frame, text="Slope = ").pack(side=tk.LEFT) 
-        line_slope = tk.Entry(line_frame, width=5); line_slope.pack(side=tk.LEFT)
-        tk.Label(line_frame, text=", Y-intercept = ").pack(side=tk.LEFT) 
-        line_intercept = tk.Entry(line_frame, width=5); line_intercept.pack(side=tk.LEFT)
-        tk.Label(line_frame, text=", From x = ").pack(side=tk.LEFT)
-        line_start_x = tk.Entry(line_frame, width=5); line_start_x.pack(side=tk.LEFT)
-        tk.Label(line_frame, text="to x = ").pack(side=tk.LEFT)
-        line_end_x = tk.Entry(line_frame, width=5); line_end_x.pack(side=tk.LEFT)        
-        self.line_button = ttk.Button(line_frame, text="Add Line",
-            command=lambda: self.add_function(input_type.LINE, line_slope, line_intercept, line_start_x, line_end_x))
-        self.line_button.pack(side=tk.LEFT, padx=10)
-
-        ttk.Button(line_frame, text="Open Visual Editor",
-            command=lambda: open_line_editor(
-                self,
-                float(line_slope.get() or 1.0),
-                float(line_intercept.get() or 0.0),
-                float(line_start_x.get() or 0.0),
-                float(line_end_x.get() or 1.0),
-                on_change=lambda m,b,x0,x1: (
-                    line_slope.delete(0, tk.END), line_slope.insert(0, str(m)),
-                    line_intercept.delete(0, tk.END), line_intercept.insert(0, str(b)),
-                    line_start_x.delete(0, tk.END), line_start_x.insert(0, str(x0)),
-                    line_end_x.delete(0, tk.END),   line_end_x.insert(0,   str(x1))
-                ),
-                on_apply=lambda m,b,x0,x1: self._add_line_from_visual_editor(m, b, x0, x1),
-                on_save_constraint=self.push_constraint_from_editor,   # keeps working
-                axis_labels=self._current_axis_labels(),
-                constraint_left_options=self._constraint_left_options(),
-                current_y_signal=self.y_parameter_var.get() or ""
-            )
-        ).pack(side=tk.LEFT, padx=6)
-
-
-
-        self.custom_functions = []
-        return line_frame
-
-    def _add_line_from_visual_editor(self, slope, y_int, x_start, x_end):
-        """Helper method to add a line function from visual editor parameters"""
-        # Create mock entry objects that return the values
-        class MockEntry:
-            def __init__(self, value):
-                self.value = str(value)
-            def get(self):
-                return self.value
-        
-        slope_entry = MockEntry(slope)
-        y_int_entry = MockEntry(y_int)
-        x_start_entry = MockEntry(x_start)
-        x_end_entry = MockEntry(x_end)
-        
-        # Call the existing add_function method
-        self.add_function(input_type.LINE, slope_entry, y_int_entry, x_start_entry, x_end_entry)
-
     def _add_heaviside_from_visual_editor(self, amplitude, t0, x1):
         """Helper method to add a heaviside function from visual editor parameters"""
         # Create mock entry objects that return the values
@@ -233,30 +179,32 @@ class CurveFitSettings(tk.Frame):
         heaviside_start_x = tk.Entry(heaviside_frame, width=5); heaviside_start_x.pack(side=tk.LEFT)
         tk.Label(heaviside_frame, text="to x = ").pack(side=tk.LEFT)
         heaviside_end_x = tk.Entry(heaviside_frame, width=5); heaviside_end_x.pack(side=tk.LEFT)
+        def _open_editor():
+            amp = float(heaviside_amplitude.get() or 1.0)
+            t0 = float(heaviside_start_x.get() or 0.0)
+            x1 = float(heaviside_end_x.get() or 1.0)
 
-        self.heaviside_button = ttk.Button(heaviside_frame, text="Add Heaviside",
-            command=lambda: self.add_function(input_type.HEAVISIDE, heaviside_amplitude, heaviside_start_x, heaviside_end_x,""))
-        self.heaviside_button.pack(side=tk.LEFT, padx=10)
+            def _on_change(a, t_start, t_end):
+                heaviside_amplitude.delete(0, tk.END); heaviside_amplitude.insert(0, str(a))
+                heaviside_start_x.delete(0, tk.END);   heaviside_start_x.insert(0, str(t_start))
+                heaviside_end_x.delete(0, tk.END);     heaviside_end_x.insert(0, str(t_end))
 
-        ttk.Button(heaviside_frame, text="Open Visual Editor",
-            command=lambda: open_heaviside_editor(
+            open_heaviside_editor(
                 self,
-                float(heaviside_amplitude.get() or 1.0),
-                float(heaviside_start_x.get() or 0.0),
-                float(heaviside_end_x.get() or 1.0),
-                on_change=lambda a,t0,x1: (
-                    heaviside_amplitude.delete(0, tk.END), heaviside_amplitude.insert(0, str(a)),
-                    heaviside_start_x.delete(0, tk.END),   heaviside_start_x.insert(0, str(t0)),
-                    heaviside_end_x.delete(0, tk.END),     heaviside_end_x.insert(0, str(x1))
-                ),
-                on_apply=lambda a,t0,x1: self._add_heaviside_from_visual_editor(a, t0, x1),
+                amp,
+                t0,
+                x1,
+                on_change=_on_change,
+                on_apply=lambda a, t_start, t_end: self._add_heaviside_from_visual_editor(a, t_start, t_end),
                 on_save_constraint=self.push_constraint_from_editor,
                 axis_labels=self._current_axis_labels(),
                 constraint_left_options=self._constraint_left_options(),
                 current_y_signal=self.y_parameter_var.get() or ""
             )
-        ).pack(side=tk.LEFT, padx=6)
-
+        self.heaviside_open_editor_callback = _open_editor
+        self.heaviside_button = ttk.Button(heaviside_frame, text="Add Heaviside",
+            command=lambda: self.add_function(input_type.HEAVISIDE, heaviside_amplitude, heaviside_start_x, heaviside_end_x,""))
+        self.heaviside_button.pack(side=tk.LEFT, padx=10)
 
 
 
@@ -336,10 +284,7 @@ class CurveFitSettings(tk.Frame):
                 constraint_left_options=self._constraint_left_options(),
                 current_y_signal=self.y_parameter_var.get() or ""
             )
-
-
-
-        ttk.Button(frame, text="Open Visual Editor", command=_open_editor).pack(side=tk.LEFT, padx=6)
+        self.piecewise_open_editor_callback = _open_editor
 
         def _add_piecewise():
             pts = list(self._pwl_points_buffer)
@@ -369,11 +314,17 @@ class CurveFitSettings(tk.Frame):
     def show_frame(self):
         selected_frame = self.input_type_options.get()
         if selected_frame in self.frames:
-            # hide all the frames first
             for frame in self.frames.values():
                 frame.pack_forget()
-            # but show the selected frame
             self.frames[selected_frame].pack(fill=tk.BOTH)
+
+            if selected_frame == "Heaviside" and hasattr(self, "heaviside_open_editor_callback"):
+                self.open_editor_button.configure(command=self.heaviside_open_editor_callback, state=tk.NORMAL)
+            elif selected_frame == "Piecewise Linear" and hasattr(self, "piecewise_open_editor_callback"):
+                self.open_editor_button.configure(command=self.piecewise_open_editor_callback, state=tk.NORMAL)
+            else:
+                self.open_editor_button.configure(command=lambda: None, state=tk.DISABLED)
+
 
     def clear_existing_data(self):
         self.custom_functions = []
@@ -385,44 +336,18 @@ class CurveFitSettings(tk.Frame):
         except Exception:
             pass
         # Reset state/buttons
-        self.line_button.config(state=tk.NORMAL)
         self.heaviside_button.config(state=tk.NORMAL)
         self.func_model.clear()
         self.time_tuples_list.clear()
 
 
     def add_function(self, in_type, arg1, arg2, arg3, arg4):
-        if in_type == input_type.LINE:
-            slope = float(arg1.get()); y_int = float(arg2.get())
-            x_start = float(arg3.get()); x_end = float(arg4.get())
-            if not self.custom_x_inputs_are_valid(x_start, x_end): return
-            if self.check_if_in_previous_x_ranges((x_start, x_end)): return
-
-            self.heaviside_button.config(state=tk.DISABLED)
-            self.time_tuples_list.append((x_start, x_end))
-            self.custom_functions.append((slope, y_int, x_start, x_end))
-            string_func = f"y = ({slope})*x + {y_int}"
-            rng = f"[{x_start} to {x_end}]"
-
-            x_values = np.linspace(x_start, x_end, 100)
-            y_values = slope * x_values + y_int
-            self.generated_data = [[float(x), float(y)] for x, y in zip(x_values, y_values)]
-            self.controller.update_app_data("generated_data", self.generated_data)
-            if self.inputs_completed_callback:
-                self.inputs_completed_callback("function_button_pressed", True)
-
-            item = {"type":"LINE", "params":(slope, y_int, x_start, x_end)}
-            self.func_model.append(item)
-            self.func_list.insert("", "end", values=("LINE", string_func, rng))
-            self._rebuild_all_line_segments()
-
-        elif in_type == input_type.HEAVISIDE:
+        if in_type == input_type.HEAVISIDE:
             amplitude = float(arg1.get()); x_start = float(arg2.get()); x_end = float(arg3.get())
             if not self.custom_x_inputs_are_valid(x_start, x_end): return
             if self.check_if_in_previous_x_ranges((x_start, x_end)): return
 
             self.time_tuples_list.append((x_start, x_end))
-            self.line_button.config(state=tk.DISABLED)
             self.custom_functions.append((amplitude, x_start, x_end))
 
             x_values = np.linspace(x_start, x_end, 100)
@@ -454,9 +379,7 @@ class CurveFitSettings(tk.Frame):
         item = self.func_model.pop(idx)
 
         # CHANGED: compute the range per type
-        if item["type"] == "LINE":
-            _, _, x0, x1 = item["params"]
-        elif item["type"] == "HEAVISIDE":
+        if item["type"] == "HEAVISIDE":
             _, x0, x1 = item["params"]
         elif item["type"] == "PIECEWISE":
             pts = item["params"]
@@ -476,7 +399,6 @@ class CurveFitSettings(tk.Frame):
         self.func_list.delete(self.func_list.get_children()[idx])
 
         if not self.func_model:
-            self.line_button.config(state=tk.NORMAL)
             self.heaviside_button.config(state=tk.NORMAL)
 
         self._rebuild_all_line_segments()  # ADDED
@@ -487,52 +409,7 @@ class CurveFitSettings(tk.Frame):
         if idx is None:
             return
         item = self.func_model[idx]
-        if item["type"] == "LINE":
-            slope, yint, x0, x1 = item["params"]
-            curr_range = (x0, x1)
-            def _apply(m, b, xa, xb):
-                nonlocal curr_range, x0, x1
-                # temporarily remove this item’s current range so we don’t collide with ourselves
-                try:
-                    self.time_tuples_list.remove(curr_range)
-                except ValueError:
-                    pass
-                if self.check_if_in_previous_x_ranges((xa, xb)):
-                    # restore old range and abort
-                    self.time_tuples_list.append(curr_range)
-                    return
-                # commit new model data
-                self.func_model[idx] = {"type": "LINE", "params": (m, b, xa, xb)}
-                # regenerate curve
-                x_values = np.linspace(xa, xb, 100)
-                y_values = m * x_values + b
-                self.generated_data = [[float(x), float(y)] for x, y in zip(x_values, y_values)]
-                self.controller.update_app_data("generated_data", self.generated_data)
-                if self.inputs_completed_callback:
-                    self.inputs_completed_callback("function_button_pressed", True)
-                # update UI
-                desc = f"y = ({m})*x + {b}"
-                rng = f"[{xa} to {xb}]"
-                row_id = self.func_list.get_children()[idx]
-                self.func_list.item(row_id, values=("LINE", desc, rng))
-                # commit new time range and update the tracker
-                self.time_tuples_list.append((xa, xb))
-                curr_range = (xa, xb)
-                x0, x1 = xa, xb
-                self._rebuild_all_line_segments()
-            open_line_editor(
-                self,
-                slope,
-                yint,
-                x0,
-                x1,
-                on_change=_apply,
-                on_save_constraint=self.push_constraint_from_editor,
-                axis_labels=self._current_axis_labels(),
-                constraint_left_options=self._constraint_left_options(),
-                current_y_signal=self.y_parameter_var.get() or ""
-            )
-        elif item["type"] == "HEAVISIDE":
+        if item["type"] == "HEAVISIDE":
             amp, x0, x1 = item["params"]
             curr_range = (x0, x1)
             def _apply(a, t0, x1_new):
@@ -871,4 +748,3 @@ class CurveFitSettings(tk.Frame):
         x_label = settings_snapshot.get("x_parameter_display") or self.x_parameter_var.get() or "x"
         y_label = settings_snapshot.get("y_parameter_display") or self.y_parameter_var.get() or "Value"
         return (x_label, y_label)
-
