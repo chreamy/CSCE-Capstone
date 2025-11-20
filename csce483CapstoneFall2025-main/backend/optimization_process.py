@@ -146,11 +146,27 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         ORIG_NETLIST_PATH = netlistPath
         NETLIST = netlistObject
         selectedParameters = selectedParameters or []
+        # Drop independent sources from the variable list
+        pruned = []
+        for name in selectedParameters:
+            comp = next((c for c in NETLIST.components if c.name == name), None)
+            if comp is None:
+                queue.put(("Log", f"Component '{name}' not found in netlist, skipping."))
+                continue
+            if getattr(comp, "type", "").upper() in {"V", "I"}:
+                queue.put(("Log", f"Skipping source '{name}' as a tunable parameter for transient analysis."))
+                continue
+            pruned.append(name)
+        selectedParameters = pruned
+        if not selectedParameters:
+            queue.put(("Failed", "No tunable parameters selected. Please choose at least one component to optimize."))
+            return
         RLCBounds = RLCBounds or [False, False, False]
 
         analysis_type = ((curveData or {}).get("analysis_type") or "transient").strip().lower()
         ac_settings = (curveData or {}).get("ac_settings") or {}
         noise_settings = (curveData or {}).get("noise_settings") or {}
+        tran_settings = (curveData or {}).get("tran_settings") or {}
         ac_response_alias = (ac_settings.get("response") if isinstance(ac_settings, dict) else None) or "magnitude"
         ac_response_alias = ac_response_alias.strip().lower()
         response_aliases = {
@@ -375,6 +391,20 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                 step_guess = max(abs(endValue), 1e-9) / 100 if endValue else 1e-9
             else:
                 step_guess = abs(span) / 100
+            def _f(token):
+                try:
+                    return float(token)
+                except (TypeError, ValueError):
+                    return None
+            tstop_override = _f(tran_settings.get("tstop"))
+            tstep_override = _f(tran_settings.get("tstep"))
+            tstart_override = _f(tran_settings.get("tstart"))
+            tmax_override = _f(tran_settings.get("max_step"))
+            use_uic = bool(tran_settings.get("uic", False))
+            if tstop_override is not None:
+                endValue = tstop_override
+            if tstart_override is not None:
+                initValue = tstart_override
             constrained_nodes = [node for node in print_variables if node != normalized_target]
             NETLIST.writeTranCmdsToFile(
                 WRITABLE_NETLIST_PATH,
@@ -384,6 +414,11 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                 step_guess,
                 normalized_target,
                 constrained_nodes,
+                override_tstep=tstep_override,
+                override_tstop=endValue,
+                override_tstart=initValue,
+                override_max_step=tmax_override,
+                use_uic=use_uic,
             )
 
         optim = curvefit_optimize(

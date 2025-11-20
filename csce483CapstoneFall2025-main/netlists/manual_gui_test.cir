@@ -1,0 +1,5 @@
+* simple test netlist for GUI validation
+V1 in 0 DC 5
+I1 out 0 DC 1m
+RREF in out 10k
+CLOAD out 0 1n

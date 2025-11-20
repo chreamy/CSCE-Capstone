@@ -23,11 +23,26 @@ class ParameterSelectionWindow(tk.Frame):
         self.controller = controller
         self.netlist_path = self.controller.get_app_data("netlist_path")
         self.available_parameters: List[str] = []
-        self.selected_parameters: List[str] = []
+        persisted_selected = self.controller.get_app_data("selected_parameters") or []
+        self.netlist: Netlist = None
+        # Try to parse the netlist early so we can filter persisted selections by component type
+        if self.netlist_path:
+            try:
+                self.netlist = Netlist(self.netlist_path)
+            except Exception:
+                # Let load_and_parse_parameters handle user-facing errors later
+                self.netlist = None
+        if self.netlist is not None:
+            component_map = {comp.name: comp for comp in self.netlist.components}
+            self.selected_parameters: List[str] = [
+                name for name in persisted_selected
+                if name in component_map
+                and not self._is_source_component(component_map[name])
+            ]
+        else:
+            self.selected_parameters: List[str] = list(persisted_selected)
         self.nodes: set[str] = set()
         self.sources: List[str] = []
-
-        self.netlist: Netlist = None
 
         # Header
         header = tk.Frame(
@@ -148,7 +163,8 @@ class ParameterSelectionWindow(tk.Frame):
     def load_and_parse_parameters(self, netlist_path: str):
         """Loads the netlist and extracts parameters."""
         try:
-            self.netlist = Netlist(netlist_path)
+            if self.netlist is None:
+                self.netlist = Netlist(netlist_path)
             self.controller.update_app_data("netlist_object", self.netlist)
             resolved_includes = self.netlist.resolve_include_paths()
             self.controller.update_app_data("netlist_includes", resolved_includes)
@@ -169,6 +185,7 @@ class ParameterSelectionWindow(tk.Frame):
                 for component in self.netlist.components
                 if isinstance(component, Component)
                 and getattr(component, "scope", "top") == "top"
+                and not self._is_source_component(component)  # skip sources
             ]
             self.nodes = self.netlist.nodes
             self.sources = self._extract_source_components()
@@ -279,8 +296,7 @@ class ParameterSelectionWindow(tk.Frame):
             return []
         names = []
         for component in self.netlist.components:
-            comp_type = getattr(component, "type", "").upper()
-            if comp_type in {"V", "I"}:
+            if self._is_source_component(component):
                 names.append(component.name)
         # Preserve original order but drop duplicates
         seen = set()
@@ -290,5 +306,15 @@ class ParameterSelectionWindow(tk.Frame):
                 seen.add(name)
                 ordered.append(name)
         return ordered
+
+    @staticmethod
+    def _is_source_component(component: Component) -> bool:
+        """
+        Returns True when the component represents an independent voltage or current source
+        (i.e., type "V" or "I" in SPICE netlists). Does not include dependent sources such as
+        VCVS, VCCS, CCCS, or CCVS.
+        """
+        comp_type = getattr(component, "type", "")
+        return str(comp_type).upper() in {"V", "I"}
 
 

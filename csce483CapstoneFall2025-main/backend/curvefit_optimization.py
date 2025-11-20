@@ -230,7 +230,27 @@ def curvefit_optimize(
         # Assumes input_curve[0] is X, input_curve[1] is Y/target_value
         x_ideal = np.array([x[0] for x in target_curve_rows])
         y_ideal = np.array([x[1] for x in target_curve_rows])
-        ideal_interpolation = interp1d(x_ideal, y_ideal)
+        # Allow slight stepping past target range without throwing, but log if we clip
+        min_x, max_x = np.min(x_ideal), np.max(x_ideal)
+
+        def _clip_and_interp(x_vals):
+            arr = np.array(x_vals)
+            out_of_bounds = (arr < min_x) | (arr > max_x)
+            if np.any(out_of_bounds):
+                warning_msg = f"Warning: Clipping {np.sum(out_of_bounds)} point(s) outside target domain [{min_x}, {max_x}]."
+                log_to_file(warning_msg)
+                if queue is not None:
+                    queue.put(("Log", warning_msg))
+                arr = np.clip(arr, min_x, max_x)
+            return _raw_interp(arr)
+
+        _raw_interp = interp1d(
+            x_ideal,
+            y_ideal,
+            bounds_error=False,
+            fill_value="extrapolate",
+        )
+        ideal_interpolation = _clip_and_interp
 
         local_netlist_file = writable_netlist_path 
     

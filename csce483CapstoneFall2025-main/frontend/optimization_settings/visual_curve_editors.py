@@ -1,9 +1,23 @@
 import tkinter as tk
-from tkinter import ttk, StringVar, BooleanVar
+from tkinter import ttk, StringVar, BooleanVar, simpledialog
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+
+
+def _apply_axis_labels(ax, axis_labels):
+    """
+    Apply contextual axis labels if provided, otherwise fall back to x/y.
+    """
+    if axis_labels and len(axis_labels) == 2:
+        x_label = axis_labels[0] or "x"
+        y_label = axis_labels[1] or "y"
+    else:
+        x_label = "x"
+        y_label = "y"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
 
 class LegacyConstraintsBar:
     """
@@ -66,7 +80,6 @@ class LegacyConstraintsBar:
         self.ax.figure.canvas.draw_idle()
 
     def _preview(self):
-        self._clear()
         try:
             left = (self.left.get() or "").strip()
             op   = self.op_var.get()
@@ -117,6 +130,17 @@ class LegacyConstraintsBar:
         except Exception as e:
             print("Preview error:", e)
 
+    def preview_constraint(self, constraint: dict):
+        """External callers can feed a saved constraint to re-draw it."""
+        if not constraint:
+            return
+        self.left.set(constraint.get("left", ""))
+        self.op_var.set(constraint.get("operator", "="))
+        self.right.delete(0, tk.END)
+        self.right.insert(0, str(constraint.get("right", "")))
+        self.x0.delete(0, tk.END); self.x0.insert(0, str(constraint.get("x_start", "")))
+        self.x1.delete(0, tk.END); self.x1.insert(0, str(constraint.get("x_end", "")))
+        self._preview()
 
     def _save(self):
         if not callable(self.on_save_constraint):
@@ -135,180 +159,6 @@ class LegacyConstraintsBar:
 
 
 # ------------------------
-# LINE editor
-# ------------------------
-def open_line_editor(owner, m_init, b_init, x0_init, x1_init, on_change=None, on_apply=None, on_save_constraint=None, axis_labels=None, constraint_left_options=None, current_y_signal=None):
-    """
-    Numeric-first API to match curve_fit_settings:
-      m_init, b_init, x0_init, x1_init : floats
-      on_change(m,b,x0,x1)  -> called on every live change
-      on_apply(m,b,x0,x1)   -> called when user clicks Apply
-    """
-    win = tk.Toplevel(owner)
-    win.title("Line Editor")
-    win.geometry("860x560")
-
-    fig = Figure(figsize=(7.8, 4.2))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
-    canvas = FigureCanvasTkAgg(fig, master=win)
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-
-    # --- Controls ------------------------------------------------------------
-    bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=6)
-
-    ttk.Label(bar, text="Slope m:").pack(side=tk.LEFT)
-    v_m = tk.StringVar(value=str(m_init))
-    e_m = ttk.Entry(bar, width=10, textvariable=v_m); e_m.pack(side=tk.LEFT, padx=(4, 12))
-
-    ttk.Label(bar, text="Intercept b:").pack(side=tk.LEFT)
-    v_b = tk.StringVar(value=str(b_init))
-    e_b = ttk.Entry(bar, width=10, textvariable=v_b); e_b.pack(side=tk.LEFT, padx=(4, 12))
-
-    ttk.Label(bar, text="x0:").pack(side=tk.LEFT)
-    v_x0 = tk.StringVar(value=str(x0_init))
-    e_x0 = ttk.Entry(bar, width=10, textvariable=v_x0); e_x0.pack(side=tk.LEFT, padx=(4, 12))
-
-    ttk.Label(bar, text="x1:").pack(side=tk.LEFT)
-    v_x1 = tk.StringVar(value=str(x1_init))
-    e_x1 = ttk.Entry(bar, width=10, textvariable=v_x1); e_x1.pack(side=tk.LEFT, padx=(4, 12))
-
-    # NEW: autoscale toggle + Fit button
-    autoscale = tk.BooleanVar(value=False)  # NEW: keep axes steady while dragging
-    ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale).pack(side=tk.LEFT, padx=(8, 6))
-    def _fit():
-        _redraw(rescale=True, emit=False)  # recompute bounds on demand
-    ttk.Button(bar, text="Fit", command=_fit).pack(side=tk.LEFT, padx=(2, 8))
-
-    ttk.Button(bar, text="Apply", command=lambda: _apply()).pack(side=tk.RIGHT, padx=8)
-
-    target_signal = None
-    if axis_labels and len(axis_labels) == 2:
-        target_signal = axis_labels[1] or "VALUE"
-    else:
-        target_signal = "VALUE"
-
-    # Create the embedded constraints panel
-    bar = LegacyConstraintsBar(
-        parent=win,                         # or the frame/shell holding your buttons
-        ax=ax,
-        left_options=constraint_left_options or [],
-        current_y_signal=current_y_signal or "",
-        on_save_constraint=on_save_constraint,
-        default_x_range=ax.get_xbound()
-    )
-    bar.frame.pack(fill="x", padx=8, pady=6)
-
-    # --- State ---------------------------------------------------------------
-    drag = {"which": None}  # 0 => x0 handle, 1 => x1 handle
-
-    def f(x, m, b): return m * x + b
-
-    def _get_vals():
-        return float(v_m.get()), float(v_b.get()), float(v_x0.get()), float(v_x1.get())
-
-    def _bounds(x0, x1, m, b):
-        xs = np.linspace(x0, x1, 100)
-        ys = f(xs, m, b)
-        xmin, xmax = float(min(xs)), float(max(xs))
-        ymin, ymax = float(np.min(ys)), float(np.max(ys))
-        if xmax <= xmin: xmax = xmin + 1.0
-        # generous padding so handles never sit on the edge
-        px = 0.08 * (xmax - xmin)
-        py = 0.25 * max(1.0, abs(ymax - ymin))
-        return xmin - px, xmax + px, ymin - py, ymax + py
-
-    # Keep references to artists so we can update them without clearing limits
-    line_artist = None
-    handles_artist = None
-
-    def _ensure_artists():
-        nonlocal line_artist, handles_artist
-        if line_artist is None:
-            line_artist, = ax.plot([], [], lw=2)
-        if handles_artist is None:
-            handles_artist = ax.scatter([], [], s=80, zorder=3, picker=5)  # NEW: bigger, easier to pick
-
-    def _redraw(rescale=False, emit=True):
-        nonlocal line_artist, handles_artist
-        _ensure_artists()
-        try:
-            m, b, x0, x1 = _get_vals()
-        except ValueError:
-            canvas.draw_idle(); return
-
-        if x1 <= x0:
-            x1 = x0 + 1e-6
-            v_x1.set(str(x1))
-
-        xs = np.linspace(x0, x1, 200)
-        ys = f(xs, m, b)
-
-        # Update artists without resetting limits
-        line_artist.set_data(xs, ys)
-        handles_artist.set_offsets(np.c_[[x0, x1], [f(x0, m, b), f(x1, m, b)]])
-
-        # Rescale only when asked or when autoscale is ON
-        if rescale or autoscale.get():  # NEW
-            xmin, xmax, ymin, ymax = _bounds(x0, x1, m, b)
-            ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
-
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
-        canvas.draw_idle()
-
-        if emit and on_change:
-            on_change(m, b, x0, x1)
-
-    def _apply():
-        try:
-            m, b, x0, x1 = _get_vals()
-        except ValueError:
-            return
-        if on_apply:
-            on_apply(m, b, x0, x1)
-        _redraw(rescale=True, emit=True)
-
-    # --- Dragging (stable limits) -------------------------------------------
-    def _nearest_handle_x(ev_x, x0, x1):
-        # Compare in data space, but with a tolerance based on current span
-        span = max(1e-9, abs(x1 - x0))
-        return 0 if abs(ev_x - x0) <= abs(ev_x - x1) else 1
-
-    def _press(ev):
-        if ev.inaxes != ax: return
-        try:
-            _, _, x0, x1 = _get_vals()
-        except ValueError:
-            return
-        drag["which"] = _nearest_handle_x(ev.xdata, x0, x1)
-
-    def _motion(ev):
-        if ev.inaxes != ax or drag["which"] is None: return
-        try:
-            m, b, x0, x1 = _get_vals()
-        except ValueError:
-            return
-        if drag["which"] == 0:
-            x0 = min(float(ev.xdata), x1 - 1e-6); v_x0.set(str(x0))
-        else:
-            x1 = max(float(ev.xdata), x0 + 1e-6); v_x1.set(str(x1))
-        _redraw(rescale=False, emit=True)  # NEW: never rescale while dragging
-
-    def _release(_ev):
-        drag["which"] = None
-        _redraw(rescale=False, emit=True)  # keep stable; user can hit Fit if needed
-
-    fig.canvas.mpl_connect("button_press_event", _press)
-    fig.canvas.mpl_connect("motion_notify_event", _motion)
-    fig.canvas.mpl_connect("button_release_event", _release)
-
-    # Also update when typing in entries
-    for var in (v_m, v_b, v_x0, v_x1):
-        var.trace_add("write", lambda *_: _redraw(rescale=False, emit=True))
-
-    _redraw(rescale=True, emit=True)
-
-
-# ------------------------
 # HEAVISIDE editor (single step)
 # ------------------------
 def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_apply=None, on_save_constraint=None, axis_labels=None, constraint_left_options=None, current_y_signal=None):
@@ -323,7 +173,7 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
     win.geometry("860x560")
 
     fig = Figure(figsize=(7.8, 4.2))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -348,13 +198,7 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
         _redraw(rescale=True, emit=False)
     ttk.Button(bar, text="Fit", command=_fit).pack(side=tk.LEFT, padx=(2, 8))
 
-    ttk.Button(bar, text="Apply", command=lambda: _apply()).pack(side=tk.RIGHT, padx=8)
 
-    target_signal = None
-    if axis_labels and len(axis_labels) == 2:
-        target_signal = axis_labels[1] or "VALUE"
-    else:
-        target_signal = "VALUE"
 
     # Create the embedded constraints panel
     bar = LegacyConstraintsBar(
@@ -365,6 +209,9 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
         on_save_constraint=on_save_constraint,
         default_x_range=ax.get_xbound()
     )
+    if hasattr(owner, "controller"):
+        setattr(owner.controller, "constraint_preview", bar.preview_constraint)
+
     bar.frame.pack(fill="x", padx=8, pady=6)
 
     # State
@@ -422,7 +269,7 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
             xmin, xmax, ymin, ymax = _bounds(a, t0, x1)
             ax.set_xlim(xmin, xmax); ax.set_ylim(ymin, ymax)
 
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+        _apply_axis_labels(ax, axis_labels)
         canvas.draw_idle()
         if emit and on_change:
             on_change(a, t0, x1)
@@ -493,7 +340,7 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
 
     # --- figure & axes
     fig = Figure(figsize=(7.9, 4.3))
-    ax = fig.add_subplot(111); ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+    ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
@@ -512,15 +359,10 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     v_y = tk.StringVar(value="")
     e_y = ttk.Entry(bar, width=12, textvariable=v_y); e_y.pack(side=tk.LEFT, padx=(4,10))
 
-    # NEW: explicit Insert (before selected row)
-    ttk.Button(bar, text="Insert", command=lambda: _insert_from_fields(append=False)).pack(side=tk.LEFT, padx=(2,12))  # NEW
-
     # NEW: autoscale toggle + Fit button
     autoscale = tk.BooleanVar(value=True)  # NEW: default ON for PWL
     ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale).pack(side=tk.LEFT, padx=(4,6))  # NEW
     ttk.Button(bar, text="Fit", command=lambda: _redraw(rescale=True, emit=False)).pack(side=tk.LEFT, padx=(2,10))  # NEW
-
-    ttk.Button(bar, text="Apply", command=lambda: _emit()).pack(side=tk.LEFT, padx=(2,8))
 
     bar = LegacyConstraintsBar(
         parent=win,                         # or the frame/shell holding your buttons
@@ -530,6 +372,8 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
         on_save_constraint=on_save_constraint,
         default_x_range=ax.get_xbound()
     )
+    if hasattr(owner, "controller"):
+        setattr(owner.controller, "constraint_preview", bar.preview_constraint)
     bar.frame.pack(fill="x", padx=8, pady=6)
     # --- table
     table = ttk.Treeview(win, columns=("idx","x","y"), show="headings", height=7)
@@ -597,7 +441,8 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
         xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
         line_artist.set_data(xs, ys)
         scatter_artist.set_offsets(np.c_[xs, ys])
-        ax.grid(True); ax.set_xlabel("x"); ax.set_ylabel("y")
+        ax.grid(True)
+        _apply_axis_labels(ax, axis_labels)
         if rescale or autoscale.get():  # NEW
             _set_limits()
         canvas.draw_idle()
@@ -722,6 +567,28 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     # initial draw
     _set_limits()
     _redraw(rescale=False, emit=True, select_idx=0)
+    
+    def _edit_point(idx):
+        if not (0 <= idx < len(pts)):
+            return
+        x_old, y_old = pts[idx]
+        new_x = simpledialog.askfloat("Edit Point", "x value:", parent=win, initialvalue=x_old)
+        if new_x is None:
+            return
+        new_y = simpledialog.askfloat("Edit Point", "y value:", parent=win, initialvalue=y_old)
+        if new_y is None:
+            return
+        pts.pop(idx)  # remove old entry
+        insert_idx = _insert_sorted(new_x, new_y, preferred_index=idx)  # keeps the list x-sorted
+        _redraw(rescale=False, emit=True, select_idx=insert_idx)
+
+    def _on_table_double_click(_event):
+        sel = _selected_index()
+        if sel is not None:
+            _edit_point(sel)
+
+    table.bind("<Double-1>", _on_table_double_click)
+
 
 def _constraint_dict_from_fields(kind, name, y_min, y_max, x0, x1, hard, weight, target_signal):
     c = {
