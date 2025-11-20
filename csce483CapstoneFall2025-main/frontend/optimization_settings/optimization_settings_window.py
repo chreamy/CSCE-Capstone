@@ -156,23 +156,34 @@ class OptimizationSettingsWindow(tk.Frame):
             highlightthickness=0,
             bg=COLORS["bg_primary"],
         )
+        hsb = ttk.Scrollbar(
+            content_wrapper,
+            orient="horizontal",
+            command=canvas.xview,
+            style="Horizontal.TScrollbar",
+        )
+        hsb.pack(side=tk.BOTTOM, fill=tk.X)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        vsb = ttk.Scrollbar(content_wrapper, orient="vertical", command=canvas.yview)
+        vsb = ttk.Scrollbar(
+            content_wrapper,
+            orient="vertical",
+            command=canvas.yview,
+            style="Vertical.TScrollbar",
+        )
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
-        canvas.configure(yscrollcommand=vsb.set)
+        canvas.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         scrollable_frame = ttk.Frame(canvas, style="TFrame")
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
-        def _on_frame_configure(event):
+        def _refresh_scrollregion(width_hint: Optional[int] = None):
+            desired_width = max(scrollable_frame.winfo_reqwidth(), width_hint or canvas.winfo_width())
+            canvas.itemconfig(canvas_window, width=desired_width)
             canvas.configure(scrollregion=canvas.bbox("all"))
 
-        scrollable_frame.bind("<Configure>", _on_frame_configure)
-        canvas.bind(
-            "<Configure>",
-            lambda event: canvas.itemconfig(canvas_window, width=event.width),
-        )
+        scrollable_frame.bind("<Configure>", lambda event: _refresh_scrollregion())
+        canvas.bind("<Configure>", lambda event: _refresh_scrollregion(event.width))
 
         def _on_mousewheel(event):
             if canvas.winfo_exists():
@@ -278,12 +289,24 @@ class OptimizationSettingsWindow(tk.Frame):
         ttk.Entry(tran_inner, textvariable=self.tmax_var, width=18).grid(row=4, column=1, sticky=tk.W, pady=3)
         # UIC toggle
         self.uic_var = tk.BooleanVar(value=self.tran_settings["uic"])
-        ttk.Checkbutton(tran_inner, text="Use Initial Conditions (UIC)", variable=self.uic_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
+        ttk.Checkbutton(
+            tran_inner,
+            text="Use Initial Conditions (UIC)",
+            variable=self.uic_var,
+            style="TCheckbutton",
+        ).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
 
         # # --- Settings Panels (Curve Fit) ---
-        setting_panel_frame = ttk.Frame(main_frame)
-        # Pack this frame where the settings should appear
-        setting_panel_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+        curve_card = create_card(main_frame)
+        curve_card.pack(side=tk.TOP, fill=tk.X, pady=8)
+        setting_panel_frame = curve_card.inner
+        tk.Label(
+            setting_panel_frame,
+            text="Target Curve",
+            font=FONTS["subheading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(anchor="w", pady=(0, 10))
 
         # Instantiate CurveFitSettings, attaching it to the setting_panel_frame
         # Make sure to include the inputs_completed_callback from the main branch version
@@ -300,7 +323,7 @@ class OptimizationSettingsWindow(tk.Frame):
             noise_settings=self.noise_settings,
         )
         # Pack the CurveFitSettings panel so it's visible
-        self.curve_fit_settings.pack(fill=tk.X)
+        self.curve_fit_settings.pack(fill=tk.BOTH, expand=True)
         self._update_ac_summary()
         self._update_noise_summary()
         self._update_analysis_ui()
@@ -391,19 +414,19 @@ class OptimizationSettingsWindow(tk.Frame):
         # R checkbox
         r_label = ttk.Label(checkbox_row, text="R:")
         r_label.pack(side=tk.LEFT)
-        r_check = ttk.Checkbutton(checkbox_row, variable=self.enable_R_bounds)
+        r_check = ttk.Checkbutton(checkbox_row, variable=self.enable_R_bounds, style="TCheckbutton")
         r_check.pack(side=tk.LEFT, padx=(0, 10))
 
         # L checkbox
         l_label = ttk.Label(checkbox_row, text="L:")
         l_label.pack(side=tk.LEFT)
-        l_check = ttk.Checkbutton(checkbox_row, variable=self.enable_L_bounds)
+        l_check = ttk.Checkbutton(checkbox_row, variable=self.enable_L_bounds, style="TCheckbutton")
         l_check.pack(side=tk.LEFT, padx=(0, 10))
 
         # C checkbox
         c_label = ttk.Label(checkbox_row, text="C:")
         c_label.pack(side=tk.LEFT)
-        c_check = ttk.Checkbutton(checkbox_row, variable=self.enable_C_bounds)
+        c_check = ttk.Checkbutton(checkbox_row, variable=self.enable_C_bounds, style="TCheckbutton")
         c_check.pack(side=tk.LEFT)
 
         # Optimization Tolerance and default bound Section
@@ -855,6 +878,7 @@ class OptimizationSettingsWindow(tk.Frame):
         self.controller.update_app_data("tran_settings", optimization_settings.get("tran_settings", {}))
 
         self.controller.update_app_data("optimization_settings", optimization_settings)
+        self.controller.update_app_data("pending_start", True)
         self.controller.update_app_data(
             "optimization_tolerances",
             [

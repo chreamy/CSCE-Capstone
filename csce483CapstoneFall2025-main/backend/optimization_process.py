@@ -3,11 +3,14 @@ import os
 import shutil
 import re
 import numpy as np
+from typing import Optional
 from backend.curvefit_optimization import (
     calculate_session_paths,
     curvefit_optimize,
     get_current_session_number,
+    AbortOptimization,
 )
+from threading import Event
 
 _MIN_SWEEP_FREQ = 1e-12  # Prevent zero-frequency AC/Noise sweeps
 _DB_FLOOR = 1e-30
@@ -138,8 +141,16 @@ def add_node_constraints(constraints, analysis_type="transient", ac_response="ma
     return formatted
 
 
-def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds, xyce_executable_path=None):
+def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds, xyce_executable_path=None, stop_event: Optional[Event] = None):
     original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
+    session_num = get_current_session_number()
+
+    def _check_abort():
+        if stop_event and stop_event.is_set():
+            queue.put(("Aborted", "Optimization aborted by user."))
+            raise AbortOptimization()
+
+    _check_abort()
     try:
         constraints = (curveData or {}).get("constraints", [])
         target_expression = (curveData or {}).get("y_parameter_expression") or (curveData or {}).get("y_parameter", "")
@@ -239,7 +250,6 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             x_parameter = "FREQ" if analysis_type in {"ac", "noise"} else "TIME"
         x_parameter = str(x_parameter).strip().upper()
 
-        session_num = get_current_session_number()
         _, group_dir, session_dir = calculate_session_paths(session_num, "runs")
         os.makedirs(session_dir, exist_ok=True)
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
@@ -417,6 +427,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
                 use_uic=use_uic,
             )
 
+        _check_abort()
         optim = curvefit_optimize(
             normalized_target,
             TEST_ROWS,
@@ -433,6 +444,8 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             ac_response=ac_response,
             noise_settings=noise_settings if analysis_type == "noise" else None,
             xyce_executable_path=xyce_executable_path,
+            stop_event=stop_event,
+            session_num=session_num,
         )
 
         NETLIST.file_path = ORIG_NETLIST_PATH
@@ -447,6 +460,10 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         queue.put(("Update", f"Least Squares Iterations: {optim[1]}"))
         queue.put(("Update", f"Total Xyce Runs: {optim[0]}"))
         queue.put(("Done", "Optimization Results:"))
+    except AbortOptimization:
+        # User requested cancellation; notify frontend and exit quietly
+        queue.put(("Aborted", "Optimization aborted by user."))
+        return
     except Exception as e:
         # Even if optimization fails, try to get partial results and log them
         print(f"Optimization failed with error: {e}")

@@ -55,6 +55,7 @@ class AppController:
                 "input_source": "",
                 "quantity": "onoise",
             },
+            "pending_start": False,
         }
         self.show_netlist_uploader()  # Start with the first window
 

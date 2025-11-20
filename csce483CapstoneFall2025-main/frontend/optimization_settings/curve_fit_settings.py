@@ -9,6 +9,7 @@ import numpy as np
 import csv
 import re
 from enum import Enum
+from ..ui_theme import COLORS, create_primary_button, create_secondary_button
 
 
 class input_type(Enum):
@@ -18,7 +19,7 @@ class input_type(Enum):
 
 class CurveFitSettings(tk.Frame):
     def __init__(self, parent: tk.Frame, parameters: List[str], nodes, controller: "AppController", inputs_completed_callback=None):
-        super().__init__(parent)
+        super().__init__(parent, bg=COLORS["bg_secondary"], bd=0, highlightthickness=0)
         self.controller = controller
         self.inputs_completed_callback = inputs_completed_callback
         self.parameters = parameters
@@ -32,9 +33,13 @@ class CurveFitSettings(tk.Frame):
         self.time_tuples_list = []
 
         # --- combobox for: line input vs heavyside vs custom csv
-        self.select_input_type_frame = ttk.Frame(self)
+        self.select_input_type_frame = ttk.Frame(self, style="Card.TFrame")
         self.select_input_type_frame.pack(side=tk.TOP, fill=tk.X)
-        ttk.Label(self.select_input_type_frame, text="Target Function Type: ").pack(side=tk.LEFT)
+        ttk.Label(
+            self.select_input_type_frame,
+            text="Target Function Type:",
+            style="Secondary.TLabel",
+        ).pack(side=tk.LEFT, padx=(0, 6))
         answer = tk.StringVar()
         self.input_type_options = ttk.Combobox(self.select_input_type_frame, textvariable=answer)
         self.input_type_options['values'] = ('Heaviside','Upload', 'Piecewise Linear')
@@ -43,9 +48,13 @@ class CurveFitSettings(tk.Frame):
             self.input_type_options.current(0)
         self.input_type_options.bind("<<ComboboxSelected>>", lambda event: self.show_frame())
         
-        self.visual_editor_bar = ttk.Frame(self)
+        self.visual_editor_bar = ttk.Frame(self, style="Card.TFrame")
         self.visual_editor_bar.pack(fill=tk.X, padx=6, pady=(6, 0))
-        self.open_editor_button = ttk.Button(self.visual_editor_bar, text="Open Visual Editor")
+        self.open_editor_button = create_secondary_button(
+            self.visual_editor_bar,
+            text="Open Visual Editor",
+            state=tk.DISABLED,
+        )
         self.open_editor_button.pack(side=tk.LEFT)
 
         self.frames['Heaviside'] = self.create_heaviside_frame()
@@ -56,7 +65,7 @@ class CurveFitSettings(tk.Frame):
             frame.pack_forget()
 
         # --- Target functions list + actions ---
-        self.see_inputted_functions = ttk.Frame(self)
+        self.see_inputted_functions = ttk.Frame(self, style="Card.TFrame")
         self.see_inputted_functions.pack(pady=5, side=tk.TOP, expand=False, fill=tk.X)
 
         self.func_list = ttk.Treeview(self.see_inputted_functions, columns=("type","desc","range"), show="headings", height=4)
@@ -68,10 +77,18 @@ class CurveFitSettings(tk.Frame):
         self.func_list.column("range", width=160, anchor="center")
         self.func_list.pack(side=tk.LEFT, padx=6, pady=4, fill=tk.X, expand=True)
 
-        btns = ttk.Frame(self.see_inputted_functions)
+        btns = ttk.Frame(self.see_inputted_functions, style="Card.TFrame")
         btns.pack(side=tk.LEFT, padx=8, pady=4)
-        ttk.Button(btns, text="Edit Selected", command=self.edit_selected_function).pack(fill=tk.X, pady=2)
-        ttk.Button(btns, text="Delete Selected", command=self.delete_selected_function).pack(fill=tk.X, pady=2)
+        create_secondary_button(
+            btns,
+            text="Edit Selected",
+            command=self.edit_selected_function,
+        ).pack(fill=tk.X, pady=4)
+        create_secondary_button(
+            btns,
+            text="Delete Selected",
+            command=self.delete_selected_function,
+        ).pack(fill=tk.X, pady=4)
 
         self.func_model = []  # list of {"type": "...", "params": (...)}
         self.custom_functions = []
@@ -85,14 +102,24 @@ class CurveFitSettings(tk.Frame):
 
         # --- X and Y Parameter Dropdowns and Expressions ---
         self.x_parameter_var = tk.StringVar(value="TIME")
-        self.x_param_label = ttk.Label(self, text="X Parameter: TIME")
+        self.x_param_label = tk.Label(
+            self,
+            text="X Parameter: TIME",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
         self.x_param_label.pack(side=tk.LEFT)
 
         self.y_parameter_var = tk.StringVar()
-        self.y_param_label = ttk.Label(self, text="Y Parameter:")
+        self.y_param_label = tk.Label(
+            self,
+            text="Y Parameter:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
         self.y_param_label.pack(side=tk.LEFT)
 
-        y_param_frame = ttk.Frame(self)
+        y_param_frame = ttk.Frame(self, style="Card.TFrame")
         y_param_frame.pack(side=tk.LEFT)
         self.y_parameter_dropdown = ttk.Combobox(
             y_param_frame,
@@ -104,8 +131,13 @@ class CurveFitSettings(tk.Frame):
         self.y_parameter_dropdown.bind("<<ComboboxSelected>>", self.on_y_parameter_selected)
 
         self.ac_response_var = tk.StringVar(value=self.ac_response_options[self.ac_response])
-        self.ac_response_frame = ttk.Frame(self)
-        self.ac_response_label = ttk.Label(self.ac_response_frame, text="AC Response:")
+        self.ac_response_frame = ttk.Frame(self, style="Card.TFrame")
+        self.ac_response_label = tk.Label(
+            self.ac_response_frame,
+            text="AC Response:",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        )
         self.ac_response_label.pack(side=tk.LEFT, padx=(10, 0))
         self.ac_response_dropdown = ttk.Combobox(
             self.ac_response_frame,
@@ -171,13 +203,32 @@ class CurveFitSettings(tk.Frame):
         self.add_function(input_type.HEAVISIDE, amplitude_entry, t0_entry, x1_entry, "")
 
     def create_heaviside_frame(self):
-        heaviside_frame = tk.Frame(self.select_input_type_frame)
+        heaviside_frame = tk.Frame(
+            self.select_input_type_frame,
+            bg=COLORS["bg_secondary"],
+        )
         heaviside_frame.pack()
-        tk.Label(heaviside_frame, text="Amplitude = ").pack(side=tk.LEFT) 
-        heaviside_amplitude = tk.Entry(heaviside_frame, width=5); heaviside_amplitude.pack(side=tk.LEFT)
-        tk.Label(heaviside_frame, text=", From x = ").pack(side=tk.LEFT)
+        tk.Label(
+            heaviside_frame,
+            text="Amplitude = ",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(side=tk.LEFT)
+        heaviside_amplitude = tk.Entry(heaviside_frame, width=5)
+        heaviside_amplitude.pack(side=tk.LEFT)
+        tk.Label(
+            heaviside_frame,
+            text=", From x = ",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(side=tk.LEFT)
         heaviside_start_x = tk.Entry(heaviside_frame, width=5); heaviside_start_x.pack(side=tk.LEFT)
-        tk.Label(heaviside_frame, text="to x = ").pack(side=tk.LEFT)
+        tk.Label(
+            heaviside_frame,
+            text="to x = ",
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(side=tk.LEFT)
         heaviside_end_x = tk.Entry(heaviside_frame, width=5); heaviside_end_x.pack(side=tk.LEFT)
         def _open_editor():
             amp = float(heaviside_amplitude.get() or 1.0)
@@ -202,9 +253,18 @@ class CurveFitSettings(tk.Frame):
                 current_y_signal=self.y_parameter_var.get() or ""
             )
         self.heaviside_open_editor_callback = _open_editor
-        self.heaviside_button = ttk.Button(heaviside_frame, text="Add Heaviside",
-            command=lambda: self.add_function(input_type.HEAVISIDE, heaviside_amplitude, heaviside_start_x, heaviside_end_x,""))
-        self.heaviside_button.pack(side=tk.LEFT, padx=10)
+        self.heaviside_button = create_primary_button(
+            heaviside_frame,
+            text="Add Heaviside",
+            command=lambda: self.add_function(
+                input_type.HEAVISIDE,
+                heaviside_amplitude,
+                heaviside_start_x,
+                heaviside_end_x,
+                "",
+            ),
+        )
+        self.heaviside_button.pack(side=tk.LEFT, padx=10, pady=(4, 2))
 
 
 
@@ -212,14 +272,26 @@ class CurveFitSettings(tk.Frame):
 
     def create_upload_frame(self):
         # --- Curve Fit File Picker ---
-        upload_frame = tk.Frame(self.select_input_type_frame)
+        upload_frame = tk.Frame(
+            self.select_input_type_frame,
+            bg=COLORS["bg_secondary"],
+        )
         upload_frame.pack()
-        curve_fit_button = ttk.Button(upload_frame, text="Select Curve File", command=self.select_curve_file_and_process)
-        curve_fit_button.pack(side=tk.LEFT, padx=10)
+        curve_fit_button = create_primary_button(
+            upload_frame,
+            text="Select Curve File",
+            command=self.select_curve_file_and_process,
+        )
+        curve_fit_button.pack(side=tk.LEFT, padx=10, pady=(2, 2))
 
         self.curve_file_path_var = tk.StringVar(value="")
-        curve_file_label = tk.Label(upload_frame, textvariable=self.curve_file_path_var)
-        curve_file_label.pack()
+        curve_file_label = tk.Label(
+            upload_frame,
+            textvariable=self.curve_file_path_var,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_secondary"],
+        )
+        curve_file_label.pack(padx=(8, 0))
         return upload_frame
     
     def _build_piecewise_series(self, pts):
@@ -260,11 +332,19 @@ class CurveFitSettings(tk.Frame):
         self.controller.update_app_data("target_line_segments", segs)
     
     def create_piecewise_frame(self):
-        frame = tk.Frame(self.select_input_type_frame)
+        frame = tk.Frame(
+            self.select_input_type_frame,
+            bg=COLORS["bg_secondary"],
+        )
         frame.pack()
         self._pwl_points_buffer = [(0.0, 0.0), (1.0, 1.0)]
         info = tk.StringVar(value="Points: 2 | Range: [0.0 .. 1.0]")
-        ttk.Label(frame, textvariable=info).pack(side=tk.LEFT, padx=6)
+        tk.Label(
+            frame,
+            textvariable=info,
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).pack(side=tk.LEFT, padx=6)
 
         def _open_editor():
             def _on_change(pts):
@@ -308,7 +388,7 @@ class CurveFitSettings(tk.Frame):
                 self.inputs_completed_callback("function_button_pressed", True)
             self._rebuild_all_line_segments()
 
-        ttk.Button(frame, text="Add Piecewise", command=_add_piecewise).pack(side=tk.LEFT, padx=10)
+        create_primary_button(frame, text="Add Piecewise", command=_add_piecewise).pack(side=tk.LEFT, padx=10, pady=(2, 2))
         return frame
 
     def show_frame(self):

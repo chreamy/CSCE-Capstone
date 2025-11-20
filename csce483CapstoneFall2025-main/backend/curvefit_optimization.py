@@ -6,12 +6,17 @@ import os
 import glob
 from datetime import datetime
 from typing import Optional, Dict, Any
+from threading import Event
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 from backend.xyce_parsing_function import parse_xyce_prn_output
 from backend.netlist_parse import Netlist
 
 _SMALL_POSITIVE = 1e-30
+
+class AbortOptimization(Exception):
+    """Raised when the user aborts an in-flight optimization."""
+    pass
 
 
 def _convert_array_to_db(values: np.ndarray) -> np.ndarray:
@@ -39,13 +44,20 @@ def log_and_append(message: str, run_info: list, queue, log_file: str = None):
     run_info.append(message)
     queue.put(("Log", message))
 
-def get_session_log_file():
-    """Get the next available session log file path."""
+def get_session_log_file(session_num: Optional[int] = None):
+    """
+    Get the session log file path.
+    If session_num is provided, reuse that session directory instead of creating a new one.
+    """
     import os
     
-    # Create runs directory if it doesn't exist
     runs_dir = "runs"
     os.makedirs(runs_dir, exist_ok=True)
+    
+    if session_num is not None:
+        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
+        os.makedirs(session_dir, exist_ok=True)
+        return os.path.join(session_dir, "session.log")
     
     # Find the next available session number
     session_num = 1
@@ -54,7 +66,6 @@ def get_session_log_file():
         log_file = os.path.join(session_dir, "session.log")
         
         if not os.path.exists(log_file):
-            # Create the session directory
             os.makedirs(session_dir, exist_ok=True)
             break
         session_num += 1
@@ -114,6 +125,8 @@ def curvefit_optimize(
     ac_response="magnitude",
     noise_settings: Optional[Dict[str, Any]] = None,
     xyce_executable_path: Optional[str] = None,
+    stop_event: Optional[Event] = None,
+    session_num: Optional[int] = None,
 ) -> None:
     """
     Run the curve-fitting optimization for the requested analysis mode.
@@ -128,11 +141,17 @@ def curvefit_optimize(
         queue: IPC queue for UI/log updates.
         custom_xtol/gtol/ftol: least_squares tolerances.
         analysis_type/x_parameter/ac_response: metadata from the UI.
-        noise_settings: optional dict with noise sweep metadata; copied locally
-            before mutation to avoid altering caller-owned dictionaries.
+    noise_settings: optional dict with noise sweep metadata; copied locally
+        before mutation to avoid altering caller-owned dictionaries.
     """
+    def _check_abort():
+        if stop_event and stop_event.is_set():
+            queue.put(("Aborted", "Optimization aborted by user."))
+            raise AbortOptimization()
+
     # Get the session log file path
-    session_log_file = get_session_log_file()
+    session_log_file = get_session_log_file(session_num)
+    _check_abort()
     
     analysis_mode = (analysis_type or "transient").strip().lower()
     x_axis_identifier = (x_parameter or "TIME").strip().upper()
@@ -157,6 +176,7 @@ def curvefit_optimize(
         response_mode = response_aliases.get((ac_response or "magnitude").strip().lower(), "magnitude")
     elif analysis_mode == "noise":
         response_mode = noise_quantity
+    _check_abort()
 
     # Initialize log file with session header
     session_start_time = datetime.now()
@@ -198,6 +218,7 @@ def curvefit_optimize(
         queue.put(("Log", f"AC response: {response_label}"))
     elif analysis_mode == "noise":
         queue.put(("Log", f"Noise quantity: {noise_quantity}"))
+    _check_abort()
     queue.put(("Log", f"Optimization parameters:"))
     queue.put(("Log", f"  xtol: {custom_xtol}"))
     queue.put(("Log", f"  gtol: {custom_gtol}"))
@@ -222,6 +243,7 @@ def curvefit_optimize(
     log_to_file(selection_msg, session_log_file)
     if queue is not None:
         queue.put(("Log", selection_msg))
+    _check_abort()
 
     # Store all run results for final logging
     all_run_results = []
@@ -250,7 +272,7 @@ def curvefit_optimize(
             out_of_bounds = (arr < min_x) | (arr > max_x)
             if np.any(out_of_bounds):
                 warning_msg = f"Warning: Clipping {np.sum(out_of_bounds)} point(s) outside target domain [{min_x}, {max_x}]."
-                log_to_file(warning_msg)
+                log_to_file(warning_msg, session_log_file)
                 if queue is not None:
                     queue.put(("Log", warning_msg))
                 arr = np.clip(arr, min_x, max_x)
@@ -313,6 +335,7 @@ def curvefit_optimize(
             raise FileNotFoundError(f"No Xyce output file found for {base_path}")
 
         def residuals(component_values, components):
+            _check_abort()
             global xyceRuns
             xyceRuns += 1
             new_netlist = netlist
@@ -341,6 +364,7 @@ def curvefit_optimize(
             
             new_netlist.class_to_file(local_netlist_file)
             _remove_old_outputs(local_netlist_file)
+            _check_abort()
 
             # Store run information for later logging
             run_info = []
@@ -360,6 +384,7 @@ def curvefit_optimize(
                 stderr=subprocess.PIPE,
                 text=True
             )
+            _check_abort()
             
             # Store Xyce output (filter out time-related messages and only log specific percent complete milestones)
             log_and_append("Xyce stdout:", run_info, queue, session_log_file)
@@ -482,6 +507,7 @@ def curvefit_optimize(
             xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
 
             for node_name, windows in node_constraints.items():
+                _check_abort()
                 node_index = resolve_header_index(node_name, "Node variable")
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
                 # Match AC dB behavior you already have
@@ -520,9 +546,20 @@ def curvefit_optimize(
         queue.put(("Log", f"Starting optimization with {len(changing_components)} variable components"))
         queue.put(("Log", f"Component bounds: {len(lower_bounds)} lower, {len(upper_bounds)} upper"))
         queue.put(("Log", "Beginning least squares optimization..."))
-        
-        result = least_squares(residuals, changing_components_values, method='trf', bounds=(lower_bounds, upper_bounds), args=(changing_components,),
-                               xtol=custom_xtol, gtol=custom_gtol, ftol = custom_ftol, jac='3-point', verbose=1)
+        _check_abort()
+
+        result = least_squares(
+            residuals,
+            changing_components_values,
+            method='trf',
+            bounds=(lower_bounds, upper_bounds),
+            args=(changing_components,),
+            xtol=custom_xtol,
+            gtol=custom_gtol,
+            ftol=custom_ftol,
+            jac='3-point',
+            verbose=1,
+        )
 
         for i in range(len(changing_components)):
             changing_components[i].value = result.x[i]

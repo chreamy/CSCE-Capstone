@@ -4,6 +4,12 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from ..ui_theme import (
+    COLORS,
+    create_primary_button,
+    create_secondary_button,
+    apply_modern_theme,
+)
 
 
 def _apply_axis_labels(ax, axis_labels):
@@ -39,9 +45,9 @@ class LegacyConstraintsBar:
 
         x0, x1 = default_x_range if default_x_range else ax.get_xbound()
 
-        self.frame = ttk.Frame(parent)
+        self.frame = ttk.Frame(parent, style="Card.TFrame")
 
-        row = ttk.Frame(self.frame); row.pack(fill="x", pady=4)
+        row = ttk.Frame(self.frame, style="Card.TFrame"); row.pack(fill="x", pady=4)
 
         ttk.Label(row, text="Left:").pack(side="left")
         self.left = ttk.Combobox(row, values=self.left_options, state="readonly", width=16)
@@ -51,9 +57,9 @@ class LegacyConstraintsBar:
 
         ttk.Label(row, text="Operator:").pack(side="left")
         self.op_var = StringVar(value="=")
-        ttk.Radiobutton(row, text="=",  variable=self.op_var, value="=").pack(side="left")
-        ttk.Radiobutton(row, text=">=", variable=self.op_var, value=">=").pack(side="left")
-        ttk.Radiobutton(row, text="<=", variable=self.op_var, value="<=").pack(side="left")
+        ttk.Radiobutton(row, text="=",  variable=self.op_var, value="=", style="TRadiobutton").pack(side="left")
+        ttk.Radiobutton(row, text=">=", variable=self.op_var, value=">=", style="TRadiobutton").pack(side="left")
+        ttk.Radiobutton(row, text="<=", variable=self.op_var, value="<=", style="TRadiobutton").pack(side="left")
 
         ttk.Label(row, text="Right:").pack(side="left", padx=(12,4))
         self.right = tk.Entry(row, width=10); self.right.pack(side="left")
@@ -63,13 +69,17 @@ class LegacyConstraintsBar:
         ttk.Label(row, text="To x:").pack(side="left", padx=(6,4))
         self.x1 = tk.Entry(row, width=8); self.x1.insert(0, str(x1)); self.x1.pack(side="left")
 
-        btns = ttk.Frame(self.frame); btns.pack(fill="x", pady=4)
-        ttk.Button(btns, text="Preview on Graph", command=self._preview).pack(side="left")
-        ttk.Button(btns, text="Clear Previews", command=self._clear).pack(side="left", padx=6)
-        ttk.Button(btns, text="Save to Constraints", command=self._save).pack(side="left", padx=10)
+        btns = ttk.Frame(self.frame, style="Card.TFrame"); btns.pack(fill="x", pady=4)
+        create_secondary_button(btns, text="Preview on Graph", command=self._preview).pack(side="left")
+        create_secondary_button(btns, text="Clear Previews", command=self._clear).pack(side="left", padx=6)
+        create_primary_button(btns, text="Save to Constraints", command=self._save).pack(side="left", padx=10)
 
-        self.note = ttk.Label(self.frame, foreground="#666",
-                              text="Preview enabled only when Left matches current Y (e.g., V(node)).")
+        self.note = ttk.Label(
+            self.frame,
+            foreground=COLORS["text_secondary"],
+            text="Preview enabled only when Left matches current Y (e.g., V(node)).",
+            style="Hint.TLabel",
+        )
         self.note.pack(anchor="w")
 
     def _clear(self):
@@ -171,32 +181,36 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
     win = tk.Toplevel(owner)
     win.title("Heaviside Editor")
     win.geometry("860x560")
+    apply_modern_theme(win)
+    win.configure(bg=COLORS["bg_primary"])
 
     fig = Figure(figsize=(7.8, 4.2))
     ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.configure(bg=COLORS["bg_primary"], highlightthickness=0)
+    canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-    bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=6)
+    bar = ttk.Frame(win, style="Card.TFrame"); bar.pack(fill=tk.X, padx=8, pady=6)
 
-    ttk.Label(bar, text="Amplitude:").pack(side=tk.LEFT)
+    ttk.Label(bar, text="Amplitude:", style="Secondary.TLabel").pack(side=tk.LEFT)
     v_a = tk.StringVar(value=str(a_init))
     ttk.Entry(bar, width=10, textvariable=v_a).pack(side=tk.LEFT, padx=(4, 12))
 
-    ttk.Label(bar, text="Start x0:").pack(side=tk.LEFT)
+    ttk.Label(bar, text="Start x0:", style="Secondary.TLabel").pack(side=tk.LEFT)
     v_x0 = tk.StringVar(value=str(t0_init))
     ttk.Entry(bar, width=10, textvariable=v_x0).pack(side=tk.LEFT, padx=(4, 12))
 
-    ttk.Label(bar, text="End x1:").pack(side=tk.LEFT)
+    ttk.Label(bar, text="End x1:", style="Secondary.TLabel").pack(side=tk.LEFT)
     v_x1 = tk.StringVar(value=str(x1_init))
     ttk.Entry(bar, width=10, textvariable=v_x1).pack(side=tk.LEFT, padx=(4, 12))
 
     # NEW: autoscale toggle + Fit button
     autoscale = tk.BooleanVar(value=False)  # NEW
-    ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale).pack(side=tk.LEFT, padx=(8, 6))
+    ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale, style="TCheckbutton").pack(side=tk.LEFT, padx=(8, 6))
     def _fit():
         _redraw(rescale=True, emit=False)
-    ttk.Button(bar, text="Fit", command=_fit).pack(side=tk.LEFT, padx=(2, 8))
+    ttk.Button(bar, text="Fit", command=_fit, style="Secondary.TButton").pack(side=tk.LEFT, padx=(2, 8))
 
 
 
@@ -337,32 +351,36 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     win = tk.Toplevel(owner)
     win.title("Piecewise Linear Editor")
     win.geometry("900x610")
+    apply_modern_theme(win)
+    win.configure(bg=COLORS["bg_primary"])
 
     # --- figure & axes
     fig = Figure(figsize=(7.9, 4.3))
     ax = fig.add_subplot(111); ax.grid(True); _apply_axis_labels(ax, axis_labels)
     canvas = FigureCanvasTkAgg(fig, master=win)
-    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.configure(bg=COLORS["bg_primary"], highlightthickness=0)
+    canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
     # --- toolbar (entries + buttons)
-    bar = ttk.Frame(win); bar.pack(fill=tk.X, padx=8, pady=6)
+    bar = ttk.Frame(win, style="Card.TFrame"); bar.pack(fill=tk.X, padx=8, pady=6)
 
     # CHANGED: “Add Point” now uses the fields and appends (x-sorted)
-    ttk.Button(bar, text="Add Point", command=lambda: _insert_from_fields(append=True)).pack(side=tk.LEFT, padx=(0,6))
-    ttk.Button(bar, text="Remove Point", command=lambda: _remove_selected()).pack(side=tk.LEFT, padx=(0,12))
+    ttk.Button(bar, text="Add Point", command=lambda: _insert_from_fields(append=True), style="Secondary.TButton").pack(side=tk.LEFT, padx=(0,6))
+    ttk.Button(bar, text="Remove Point", command=lambda: _remove_selected(), style="Secondary.TButton").pack(side=tk.LEFT, padx=(0,12))
 
-    ttk.Label(bar, text="x:").pack(side=tk.LEFT)
+    ttk.Label(bar, text="x:", style="Secondary.TLabel").pack(side=tk.LEFT)
     v_x = tk.StringVar(value="")
     e_x = ttk.Entry(bar, width=12, textvariable=v_x); e_x.pack(side=tk.LEFT, padx=(4,10))
 
-    ttk.Label(bar, text="y:").pack(side=tk.LEFT)
+    ttk.Label(bar, text="y:", style="Secondary.TLabel").pack(side=tk.LEFT)
     v_y = tk.StringVar(value="")
     e_y = ttk.Entry(bar, width=12, textvariable=v_y); e_y.pack(side=tk.LEFT, padx=(4,10))
 
     # NEW: autoscale toggle + Fit button
     autoscale = tk.BooleanVar(value=True)  # NEW: default ON for PWL
-    ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale).pack(side=tk.LEFT, padx=(4,6))  # NEW
-    ttk.Button(bar, text="Fit", command=lambda: _redraw(rescale=True, emit=False)).pack(side=tk.LEFT, padx=(2,10))  # NEW
+    ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale, style="TCheckbutton").pack(side=tk.LEFT, padx=(4,6))  # NEW
+    ttk.Button(bar, text="Fit", command=lambda: _redraw(rescale=True, emit=False), style="Secondary.TButton").pack(side=tk.LEFT, padx=(2,10))  # NEW
 
     bar = LegacyConstraintsBar(
         parent=win,                         # or the frame/shell holding your buttons

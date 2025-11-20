@@ -42,6 +42,9 @@ class OptimizationSummary(tk.Frame):
         self.convergence_window = None
         self.convergence_label = None
         self.error_label = None
+        self.stop_event: Optional[th.Event] = None
+        self.abort_requested = False
+        self.aborted_state = False
         self._create_convergence_window()
         self._graph_update_counter = 0
         self._message_batch_limit = 40
@@ -65,10 +68,18 @@ class OptimizationSummary(tk.Frame):
         
         self.parent.after(100, self.update_ui)
         
-        # Only start optimization if we don't have existing results (i.e., first time here)
-        if self.controller.get_app_data("optimization_results") is None:
+        # Decide whether to start or show saved state
+        existing_results = self.controller.get_app_data("optimization_results")
+        pending_start = bool(self.controller.get_app_data("pending_start"))
+        if pending_start:
+            self.controller.update_app_data("pending_start", False)
             self.start_optimization()
-        else:
+        elif isinstance(existing_results, dict) and existing_results.get("aborted"):
+            # Restore aborted view without restarting
+            self.aborted_state = True
+            self._set_aborted_ui()
+            self._update_history_button_state()
+        elif existing_results is not None:
             # Returning from history - show the existing results
             self._show_completed_state()
         
@@ -83,17 +94,23 @@ class OptimizationSummary(tk.Frame):
         window.geometry("240x150")
         window.transient(self.parent)
         window.resizable(False, False)
+        apply_modern_theme(window)
+        window.configure(bg=self.COLORS["bg_secondary"])
         self.convergence_window = window
         self.convergence_label = tk.Label(
             window,
             text="Convergence: -- %",
-            font=("Segoe UI", 12),
+            font=("Segoe UI", 12, "bold"),
+            bg=self.COLORS["bg_secondary"],
+            fg=self.COLORS["text_primary"],
         )
         self.convergence_label.pack(padx=20, pady=(18, 5))
         self.error_label = tk.Label(
             window,
             text="Max Error: --\nRMS Error: --",
             font=("Segoe UI", 11),
+            bg=self.COLORS["bg_secondary"],
+            fg=self.COLORS["text_secondary"],
         )
         self.error_label.pack(padx=20, pady=(0, 12))
         window.protocol("WM_DELETE_WINDOW", self._on_convergence_window_close)
@@ -146,7 +163,24 @@ class OptimizationSummary(tk.Frame):
             bg=self.COLORS['bg_secondary']
         )
         self.status_label.pack(side=tk.LEFT, padx=30, pady=20)
-        
+
+        # Abort button pinned in the header so it remains visible
+        self.abort_button = tk.Button(
+            self.header_frame,
+            text="Abort",
+            font=("Segoe UI", 12, "bold"),
+            bg=self.COLORS['error'],
+            fg="#ffffff",
+            bd=0,
+            relief=tk.FLAT,
+            padx=18,
+            pady=10,
+            command=self.abort_optimization,
+            cursor="hand2",
+            state=tk.DISABLED,
+        )
+        self.abort_button.pack(side=tk.RIGHT, padx=(10, 0), pady=20)
+
         # Toggle sidebar button
         self.sidebar_toggle = tk.Button(
             self.header_frame,
@@ -161,7 +195,7 @@ class OptimizationSummary(tk.Frame):
             command=self._toggle_sidebar,
             cursor="hand2"
         )
-        self.sidebar_toggle.pack(side=tk.RIGHT, padx=30, pady=20)
+        self.sidebar_toggle.pack(side=tk.RIGHT, padx=(0, 10), pady=20)
 
     def _create_sidebar(self):
         """Create the collapsible sidebar for logs"""
@@ -433,9 +467,10 @@ class OptimizationSummary(tk.Frame):
         self.plot_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # Plot title
+        self.plot_title_var = tk.StringVar(value="Optimization Progress")
         tk.Label(
             self.plot_frame,
-            text="Optimization Progress",
+            textvariable=self.plot_title_var,
             font=("Segoe UI", 16, "bold"),
             fg=self.COLORS['text_primary'],
             bg=self.COLORS['bg_secondary']
@@ -522,6 +557,20 @@ class OptimizationSummary(tk.Frame):
             self.content_frame.configure(width=content_width)
             self.content_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=False)
             
+    def abort_optimization(self) -> None:
+        """Signal the worker thread to stop and update UI state."""
+        if self.stop_event and not self.stop_event.is_set():
+            self.stop_event.set()
+            self._add_log_entry("Abort requested by user.", "WARNING")
+            self._set_aborted_ui()
+            self.optimization_active = False
+            self.abort_requested = True
+            self.aborted_state = True
+            self._update_history_button_state()
+            self.abort_button.config(state=tk.DISABLED)
+            self.back_to_settings_button.config(state=tk.DISABLED)
+            self.restart_button.pack_forget()
+
             # Force update to ensure proper layout
             self.parent.update_idletasks()
 
@@ -708,10 +757,12 @@ class OptimizationSummary(tk.Frame):
 
     def _update_history_button_state(self) -> None:
         """Enable history navigation only when idle and history exists."""
-        if not hasattr(self, "history_button"):
+        if not hasattr(self, "history_button") or not self.history_button.winfo_exists():
             return
         if self.optimization_active:
             state = tk.DISABLED
+        elif getattr(self, "aborted_state", False):
+            state = tk.NORMAL
         else:
             state = tk.NORMAL if self._history_available() else tk.DISABLED
         self.history_button.config(state=state)
@@ -734,9 +785,15 @@ class OptimizationSummary(tk.Frame):
         self.back_to_settings_button.config(state=tk.DISABLED)
         self._graph_update_counter = 0
         self.optimization_active = True
+        self.abort_requested = False
+        self.aborted_state = False
+        if hasattr(self, "plot_title_var"):
+            self.plot_title_var.set("Optimization Progress")
         self._update_history_button_state()
         self._reset_status_view()
+        self.abort_button.config(state=tk.NORMAL)
         self.queue = queue.Queue()
+        self.stop_event = th.Event()
         self.thread = th.Thread(
             target=optimizeProcess,
             args=(
@@ -749,6 +806,7 @@ class OptimizationSummary(tk.Frame):
                 self.optimizationTolerances,
                 self.RLCBounds,
                 self.xyceExecutablePath,
+                self.stop_event,
             ),
         )
         self.thread.daemon = True
@@ -766,21 +824,58 @@ class OptimizationSummary(tk.Frame):
 
     def _reset_status_view(self) -> None:
         self.status_label.config(text="Optimization In Progress", fg=self.COLORS['text_primary'])
+        # Keep the existing plot title unless we start a new run
         if hasattr(self, "line"):
             self.line.set_data([], [])
         self.ax.set_ylim(self.minBound, self.maxBound)
         if hasattr(self, "canvas"):
             self.canvas.draw()
+        if hasattr(self, "abort_button"):
+            self.abort_button.config(state=tk.NORMAL)
         
         # Reset to computing state
         self._show_computing_state()
 
     def _cleanup_worker(self) -> None:
+        if self.stop_event and not self.stop_event.is_set():
+            self.stop_event.set()
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=0.1)
         self.thread = None
         self.queue = None
         self.optimization_active = False
+        if self.abort_requested:
+            self._add_log_entry("Optimization aborted.", "WARNING")
+            self._set_aborted_ui()
+            self.controller.update_app_data(
+                "optimization_results",
+                {"aborted": True, "runs": self.run_count_label.cget("text")},
+            )
+            self.abort_requested = False
+            self.aborted_state = True
+            self.abort_button.config(state=tk.DISABLED)
+            self._update_history_button_state()
+        if hasattr(self, "abort_button") and self.abort_button.winfo_exists():
+            self.abort_button.config(state=tk.DISABLED)
+        self.stop_event = None
+
+    def _set_aborted_ui(self) -> None:
+        self.status_label.config(text="Optimization Aborted", fg=self.COLORS['warning'])
+        if hasattr(self, "plot_title_var"):
+            self.plot_title_var.set("Optimization Aborted")
+        # Show the results frame with action buttons so users can restart/history/close
+        self.computing_frame.pack_forget()
+        self.results_frame.pack(fill=tk.X, pady=20)
+        self.results_label.config(text="Aborted", fg=self.COLORS['warning'])
+        self.restart_button.config(state=tk.NORMAL)
+        self.history_button.config(state=tk.NORMAL)
+        self.close_button.config(state=tk.NORMAL)
+        self.back_to_settings_button.pack_forget()
+        # Persist aborted state so returning from history does not restart
+        self.controller.update_app_data(
+            "optimization_results",
+            {"aborted": True, "runs": self.run_count_label.cget("text")},
+        )
 
     def return_to_settings(self) -> None:
         self._cleanup_worker()
@@ -797,6 +892,8 @@ class OptimizationSummary(tk.Frame):
         self.controller.navigate("netlist_uploader")
 
     def update_ui(self) -> None:
+        if not self.winfo_exists():
+            return  # window destroyed; stop scheduling updates
         try:
             if self.queue:
                 messages_processed = 0
@@ -814,6 +911,10 @@ class OptimizationSummary(tk.Frame):
                     drained_queue = False
                     messages_processed += 1
 
+                    # If abort was requested, ignore non-critical messages except Aborted/Failed notice
+                    if self.abort_requested and msg_type not in {"Aborted", "Failed"}:
+                        continue
+
                     if msg_type == "Update":
                         if "total runs completed:" in msg_value:
                             try:
@@ -827,25 +928,47 @@ class OptimizationSummary(tk.Frame):
                         continue
                     elif msg_type == "Done":
                         self._add_log_entry(msg_value, "SUCCESS")
-                        self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
-                        self.optimization_active = False
-                        self.back_to_settings_button.pack_forget()
-                        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                        if not self.aborted_state:
+                            self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
+                            self.plot_title_var.set("Optimization Progress")
+                            self.optimization_active = False
+                            self.abort_requested = False
+                            self.abort_button.config(state=tk.DISABLED)
+                            self.back_to_settings_button.pack_forget()
+                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
                     elif msg_type == "Failed":
                         self._add_log_entry(f"Optimization Failed: {msg_value}", "ERROR")
-                        self.status_label.config(text="Optimization Failed", fg=self.COLORS['error'])
+                        if not self.aborted_state:
+                            self.status_label.config(text="Optimization Failed", fg=self.COLORS['error'])
+                            self.plot_title_var.set("Optimization Progress")
+                            self.optimization_active = False
+                            self.abort_requested = False
+                            self.abort_button.config(state=tk.DISABLED)
+                            self.back_to_settings_button.pack_forget()
+                            self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                    elif msg_type == "Aborted":
+                        self._add_log_entry(msg_value, "WARNING")
+                        self._set_aborted_ui()
+                        self.controller.update_app_data(
+                            "optimization_results",
+                            {"aborted": True, "runs": self.run_count_label.cget("text")},
+                        )
                         self.optimization_active = False
-                        self.back_to_settings_button.pack_forget()
-                        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+                        self.abort_requested = False
+                        self.aborted_state = True
+                        self.abort_button.config(state=tk.DISABLED)
+                        self.back_to_settings_button.config(state=tk.NORMAL)
                     elif msg_type == "UpdateNetlist":
                         self.controller.update_app_data("netlist_object", msg_value)
                         self._add_log_entry("Netlist updated", "INFO")
                     elif msg_type == "UpdateOptimizationResults":
-                        self.controller.update_app_data("optimization_results", msg_value)
-                        self._show_results_state(msg_value)
-                        self._add_log_entry("Optimization results updated", "SUCCESS")
+                        if not self.aborted_state:
+                            self.controller.update_app_data("optimization_results", msg_value)
+                            self._show_results_state(msg_value)
+                            self._add_log_entry("Optimization results updated", "SUCCESS")
                     elif msg_type == "UpdateYData":
-                        self.update_graph(msg_value)
+                        if not self.aborted_state:
+                            self.update_graph(msg_value)
                     else:
                         self._add_log_entry(f"Unknown message type: {msg_type} - {msg_value}", "WARNING")
 

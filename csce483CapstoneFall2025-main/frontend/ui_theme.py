@@ -201,6 +201,40 @@ def apply_modern_theme(root: tk.Misc) -> ttk.Style:
         bordercolor=COLORS["bg_secondary"],
     )
 
+    # Toggle controls
+    style.configure(
+        "TCheckbutton",
+        background=COLORS["bg_secondary"],
+        foreground=COLORS["text_primary"],
+        focuscolor=COLORS["bg_secondary"],
+        bordercolor=COLORS["border"],
+        indicatordiameter=12,
+        indicatorbackground="#ffffff",
+        indicatorcolor=COLORS["accent"],
+    )
+    style.map(
+        "TCheckbutton",
+        background=[("active", COLORS["bg_tertiary"]), ("disabled", COLORS["bg_secondary"])],
+        foreground=[("disabled", COLORS["text_secondary"])],
+        indicatorcolor=[("selected", COLORS["accent"]), ("!selected", COLORS["border"])],
+    )
+    style.configure(
+        "TRadiobutton",
+        background=COLORS["bg_secondary"],
+        foreground=COLORS["text_primary"],
+        focuscolor=COLORS["bg_secondary"],
+        bordercolor=COLORS["border"],
+        indicatordiameter=11,
+        indicatorbackground="#ffffff",
+        indicatorcolor=COLORS["accent"],
+    )
+    style.map(
+        "TRadiobutton",
+        background=[("active", COLORS["bg_tertiary"]), ("disabled", COLORS["bg_secondary"])],
+        foreground=[("disabled", COLORS["text_secondary"])],
+        indicatorcolor=[("selected", COLORS["accent"]), ("!selected", COLORS["border"])],
+    )
+
     return style
 
 
