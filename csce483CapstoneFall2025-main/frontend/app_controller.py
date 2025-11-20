@@ -38,6 +38,13 @@ class AppController:
                 "stop_frequency": 1e6,
                 "response": "magnitude",
             },
+            "tran_settings": {
+                "tstop": None,
+                "tstep": None,
+                "tstart": None,
+                "max_step": None,
+                "uic": False,
+            },
             "noise_settings": {
                 "sweep_type": "DEC",
                 "points": 10,
