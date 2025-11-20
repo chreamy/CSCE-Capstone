@@ -18,6 +18,15 @@ def _convert_array_to_db(values: np.ndarray) -> np.ndarray:
     """Convert magnitude array to dB using a safe numeric floor."""
     return 20.0 * np.log10(np.maximum(values, _SMALL_POSITIVE))
 
+def calculate_session_paths(session_num: int, runs_dir: str = "runs") -> tuple[str, str, str]:
+    """Return (group_folder, group_dir, session_dir) for a given session number."""
+    group_start = ((session_num - 1) // 10) * 10 + 1
+    group_end = group_start + 9
+    group_folder = f"{group_start}-{group_end}"
+    group_dir = os.path.join(runs_dir, group_folder)
+    session_dir = os.path.join(group_dir, str(session_num))
+    return group_folder, group_dir, session_dir
+
 def log_to_file(message: str, log_file: str = None):
     """Write log message to log file."""
     if log_file is None:
@@ -36,20 +45,12 @@ def get_session_log_file():
     
     # Create runs directory if it doesn't exist
     runs_dir = "runs"
-    if not os.path.exists(runs_dir):
-        os.makedirs(runs_dir)
+    os.makedirs(runs_dir, exist_ok=True)
     
     # Find the next available session number
     session_num = 1
     while True:
-        # Calculate group folder (1-10, 11-20, etc.)
-        group_start = ((session_num - 1) // 10) * 10 + 1
-        group_end = group_start + 9
-        group_folder = f"{group_start}-{group_end}"
-        
-        # Build path: runs/1-10/1/session.log
-        group_dir = os.path.join(runs_dir, group_folder)
-        session_dir = os.path.join(group_dir, str(session_num))
+        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
         log_file = os.path.join(session_dir, "session.log")
         
         if not os.path.exists(log_file):
@@ -66,20 +67,12 @@ def get_current_session_number():
     
     # Create runs directory if it doesn't exist
     runs_dir = "runs"
-    if not os.path.exists(runs_dir):
-        os.makedirs(runs_dir)
+    os.makedirs(runs_dir, exist_ok=True)
     
     # Find the next available session number
     session_num = 1
     while True:
-        # Calculate group folder (1-10, 11-20, etc.)
-        group_start = ((session_num - 1) // 10) * 10 + 1
-        group_end = group_start + 9
-        group_folder = f"{group_start}-{group_end}"
-        
-        # Build path: runs/1-10/1/session.log
-        group_dir = os.path.join(runs_dir, group_folder)
-        session_dir = os.path.join(group_dir, str(session_num))
+        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
         log_file = os.path.join(session_dir, "session.log")
         
         if not os.path.exists(log_file):
@@ -211,6 +204,25 @@ def curvefit_optimize(
     queue.put(("Log", f"  ftol: {custom_ftol}"))
     queue.put(("Log", "="*80))
 
+    xyce_command = "Xyce"
+    selection_msg = "Using default Xyce executable: Xyce"
+    if xyce_executable_path:
+        candidate = os.path.abspath(xyce_executable_path)
+        is_executable = os.path.isfile(candidate) and (
+            os.access(candidate, os.X_OK) or os.name == "nt"
+        )
+        if is_executable:
+            xyce_command = candidate
+            selection_msg = f"Using Xyce executable: {xyce_command}"
+        else:
+            selection_msg = (
+                f"Provided Xyce executable path '{xyce_executable_path}' is invalid or "
+                "not executable. Falling back to default 'Xyce'."
+            )
+    log_to_file(selection_msg, session_log_file)
+    if queue is not None:
+        queue.put(("Log", selection_msg))
+
     # Store all run results for final logging
     all_run_results = []
     
@@ -336,12 +348,12 @@ def curvefit_optimize(
             # Use combined function for all run logging
             log_and_append(f"Run #{xyceRuns} - Starting Xyce simulation", run_info, queue, session_log_file)
             log_and_append(f"Netlist file: {local_netlist_file}", run_info, queue, session_log_file)
+            log_and_append(f"Xyce command: {xyce_command}", run_info, queue, session_log_file)
             log_and_append("Component values:", run_info, queue, session_log_file)
             for comp in new_netlist.components:
                 log_and_append(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})", run_info, queue, session_log_file)
             
             # Run Xyce with full output capture
-            xyce_command = xyce_executable_path if xyce_executable_path else "Xyce"
             process = subprocess.run(
                 [xyce_command, "-delim", "COMMA", local_netlist_file],
                 stdout=subprocess.PIPE,

@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 from tkinter import ttk
 import queue
@@ -65,7 +66,7 @@ class OptimizationSummary(tk.Frame):
         self.parent.after(100, self.update_ui)
         
         # Only start optimization if we don't have existing results (i.e., first time here)
-        if not self.controller.get_app_data("optimization_results"):
+        if self.controller.get_app_data("optimization_results") is None:
             self.start_optimization()
         else:
             # Returning from history - show the existing results
@@ -342,6 +343,7 @@ class OptimizationSummary(tk.Frame):
         
         # Initialize with computing state
         self._show_computing_state()
+        self._update_history_button_state()
 
     def _show_computing_state(self):
         """Show the computing state with loading indicator"""
@@ -691,6 +693,28 @@ class OptimizationSummary(tk.Frame):
         
         # Load the final optimized curve if available
         self._update_target_plot()
+        self._update_history_button_state()
+
+    def _history_available(self) -> bool:
+        """Determine if there is any history to show."""
+        runs_dir = "runs"
+        has_runs = False
+        try:
+            if os.path.exists(runs_dir):
+                has_runs = any(os.scandir(runs_dir))
+        except OSError:
+            has_runs = False
+        return self.controller.get_app_data("optimization_results") is not None or has_runs
+
+    def _update_history_button_state(self) -> None:
+        """Enable history navigation only when idle and history exists."""
+        if not hasattr(self, "history_button"):
+            return
+        if self.optimization_active:
+            state = tk.DISABLED
+        else:
+            state = tk.NORMAL if self._history_available() else tk.DISABLED
+        self.history_button.config(state=state)
 
     def start_optimization(self) -> None:
         self._ensure_convergence_window()
@@ -702,12 +726,15 @@ class OptimizationSummary(tk.Frame):
         self._latest_simulation = None
         if self.thread and self.thread.is_alive():
             return
+        # Clear any previous results so a fresh run will start
+        self.controller.update_app_data("optimization_results", None)
         self._load_context()
         self._prepare_target_data()
         self._update_target_plot()
         self.back_to_settings_button.config(state=tk.DISABLED)
         self._graph_update_counter = 0
         self.optimization_active = True
+        self._update_history_button_state()
         self._reset_status_view()
         self.queue = queue.Queue()
         self.thread = th.Thread(
@@ -764,6 +791,8 @@ class OptimizationSummary(tk.Frame):
         """Restart from netlist upload step"""
         self._cleanup_worker()
         self._destroy_convergence_window()
+        # Clear prior results so the next run starts cleanly
+        self.controller.update_app_data("optimization_results", None)
         # Navigate back to netlist uploader to start fresh
         self.controller.navigate("netlist_uploader")
 
@@ -834,6 +863,8 @@ class OptimizationSummary(tk.Frame):
 
         if not self.optimization_active:
             self._cleanup_worker()
+
+        self._update_history_button_state()
 
         # Continue the update loop every 100ms
         self.parent.after(100, self.update_ui)

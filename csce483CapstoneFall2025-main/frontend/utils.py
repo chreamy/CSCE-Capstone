@@ -36,11 +36,11 @@ def open_executable_dialog() -> Optional[str]:
     file_path = filedialog.askopenfilename(
         title="Select Xyce Executable",
         filetypes=[
-            ("Executable Files", ("*.exe", "*")),
+            ("Executable Files", "*.exe *.bat *.sh *.out *.app *.bin"),
             ("All Files", "*.*"),
         ],
     )
-    return file_path if file_path else None
+    return file_path or None
 
 
 def import_constraints_from_file() -> Optional[List[Dict[str, str]]]:

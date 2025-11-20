@@ -1,8 +1,9 @@
+import os
 import tkinter as tk
 from tkinter import messagebox
-from .utils import open_file_dialog, open_executable_dialog
 from typing import Optional
 
+from .utils import open_executable_dialog, open_file_dialog
 from .ui_theme import (
     COLORS,
     FONTS,
@@ -68,10 +69,6 @@ class NetlistUploaderWindow(tk.Frame):
         )
         self.status_label.pack(fill=tk.X, pady=(0, 24))
 
-    
-
-        
-
         self.xyce_button = create_primary_button(
             content, text="Select Xyce Executable", command=self.select_xyce_executable
         )
@@ -124,32 +121,39 @@ class NetlistUploaderWindow(tk.Frame):
         """Handles the Xyce executable selection."""
         file_path = open_executable_dialog()
         if file_path:
-            # Validate that the file is an executable
-            if not file_path.lower().endswith('.exe'):
+            normalized_path = os.path.abspath(file_path)
+            if not os.path.isfile(normalized_path):
                 messagebox.showerror(
                     "Invalid File",
-                    "Please select a valid executable file (.exe)"
+                    "The selected path is not a file. Please choose a valid executable.",
                 )
-                self.xyce_status_label.config(
-                    text="Using default 'Xyce' command from PATH",
-                    fg=COLORS["text_secondary"],
-                )
+                self._refresh_xyce_status_label()
                 return
-            
-            self.xyce_executable_path = file_path
-            self.controller.update_app_data("xyce_executable_path", self.xyce_executable_path)
+
+            is_executable = os.access(normalized_path, os.X_OK)
+            if os.name == "nt":
+                # Windows may not mark executables with X_OK flags; allow common extensions
+                is_executable = normalized_path.lower().endswith(".exe") or is_executable
+
+            if not is_executable:
+                messagebox.showerror(
+                    "Invalid File",
+                    "Please select a file that can be executed by Xyce.",
+                )
+                self._refresh_xyce_status_label()
+                return
+
+            self.xyce_executable_path = normalized_path
+            self.controller.update_app_data(
+                "xyce_executable_path", self.xyce_executable_path
+            )
             self.xyce_status_label.config(
-                text=f"✓ Selected: {file_path}",
+                text=f"Selected: {normalized_path}",
                 fg=COLORS["success"],
             )
         else:
-            # Reset to default if cancelled
-            self.xyce_executable_path = None
-            self.controller.update_app_data("xyce_executable_path", None)
-            self.xyce_status_label.config(
-                text="Using default 'Xyce' command from PATH",
-                fg=COLORS["text_secondary"],
-            )
+            # Keep existing selection if present; only reset the UI message
+            self._refresh_xyce_status_label()
 
     def go_to_next_window(self) -> None:
         """Navigates to the next window (parameter selection)."""
@@ -157,3 +161,16 @@ class NetlistUploaderWindow(tk.Frame):
             self.controller.navigate("parameter_selection")
         else:
             messagebox.showwarning("Warning", "Please upload a netlist first.")
+
+    def _refresh_xyce_status_label(self) -> None:
+        """Update the status label based on the current executable selection."""
+        if self.xyce_executable_path:
+            self.xyce_status_label.config(
+                text=f"Selected: {self.xyce_executable_path}",
+                fg=COLORS["success"],
+            )
+        else:
+            self.xyce_status_label.config(
+                text="Using default 'Xyce' command from PATH",
+                fg=COLORS["text_secondary"],
+            )

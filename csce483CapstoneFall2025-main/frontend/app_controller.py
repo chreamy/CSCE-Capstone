@@ -28,7 +28,7 @@ class AppController:
             "optimization_settings": {},
             "nodes": set(),
             "source_names": [],
-            "optimization_results": [],
+            "optimization_results": None,
             "netlist_object": None,
             "generated_data": [],
             "analysis_type": "transient",

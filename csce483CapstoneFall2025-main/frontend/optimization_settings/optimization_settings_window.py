@@ -871,6 +871,8 @@ class OptimizationSettingsWindow(tk.Frame):
                 self.enable_C_bounds.get(),
             ],
         )
+        # Reset results so the next summary view starts a fresh optimization run
+        self.controller.update_app_data("optimization_results", None)
         self.controller.navigate("optimization_summary")
 
     def import_constraints(self):

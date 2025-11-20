@@ -3,7 +3,11 @@ import os
 import shutil
 import re
 import numpy as np
-from backend.curvefit_optimization import curvefit_optimize, get_current_session_number
+from backend.curvefit_optimization import (
+    calculate_session_paths,
+    curvefit_optimize,
+    get_current_session_number,
+)
 
 _MIN_SWEEP_FREQ = 1e-12  # Prevent zero-frequency AC/Noise sweeps
 _DB_FLOOR = 1e-30
@@ -236,16 +240,8 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         x_parameter = str(x_parameter).strip().upper()
 
         session_num = get_current_session_number()
-        # Calculate group folder (1-10, 11-20, etc.)
-        group_start = ((session_num - 1) // 10) * 10 + 1
-        group_end = group_start + 9
-        group_folder = f"{group_start}-{group_end}"
-        
-        # Build path: runs/1-10/1/
-        group_dir = os.path.join("runs", group_folder)
-        session_dir = os.path.join(group_dir, str(session_num))
-        if not os.path.exists(session_dir):
-            os.makedirs(session_dir)
+        _, group_dir, session_dir = calculate_session_paths(session_num, "runs")
+        os.makedirs(session_dir, exist_ok=True)
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
 
         NODE_CONSTRAINTS = add_node_constraints(constraints, analysis_type, ac_response)
