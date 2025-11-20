@@ -1,4 +1,4 @@
-﻿* Qucs 25.1.0  C:/Users/jnucc/Desktop/test.sch
+* Qucs 25.1.0  C:/Users/jnucc/Desktop/test.sch
 .tran 0 10m 0.001m
 .print tran v(vout)
 .SUBCKT OpAmps_uA741  gnd  _net3 _net22 _net0 _net11 _net14
