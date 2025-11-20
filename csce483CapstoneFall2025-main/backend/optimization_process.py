@@ -151,7 +151,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         for name in selectedParameters:
             comp = next((c for c in NETLIST.components if c.name == name), None)
             if comp is None:
-                queue.put(("Log", f"Skipping source '{name}' as a tunable parameter (sources cannot be tuned in any analysis type)."))
+                queue.put(("Log", f"Component '{name}' not found in netlist, skipping."))
                 continue
             if getattr(comp, "type", "").upper() in {"V", "I"}:
                 queue.put(("Log", f"Skipping source '{name}' as a tunable parameter for transient analysis."))
