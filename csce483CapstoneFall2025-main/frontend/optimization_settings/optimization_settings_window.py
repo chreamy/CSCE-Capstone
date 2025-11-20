@@ -730,7 +730,7 @@ class OptimizationSettingsWindow(tk.Frame):
 
     def _collect_tran_settings(self) -> Optional[Dict[str, Optional[float]]]:
         if self.analysis_type != "transient":
-            return {}
+            return None
 
         def _parse_optional(var: tk.StringVar, label: str) -> (Optional[float], Optional[str]):
             raw = (var.get() or "").strip()
