@@ -118,15 +118,25 @@ class Netlist:
                         scope=scope,
                     ))
                 elif leading_char in {"V", "I"}:
-                    # Try to find a numeric token (handle sources like "V1 node0 0 DC 3.3")
+                    # Improved parsing for voltage/current sources
                     raw_value = None
                     converted_value = None
-                    for token in reversed(tokens[3:]):
-                        candidate = self._convert_value(token, parameter_values)
-                        if candidate is not None:
-                            converted_value = candidate
-                            raw_value = token
+                    # Look for "DC" or "AC" keyword and use the value after it
+                    found_keyword = False
+                    for i in range(3, len(tokens) - 1):
+                        if tokens[i].upper() in {"DC", "AC"}:
+                            found_keyword = True
+                            raw_value = tokens[i + 1]
+                            converted_value = self._convert_value(raw_value, parameter_values)
                             break
+                    if not found_keyword:
+                        # Fallback: use the first numeric token after the node list
+                        for token in tokens[3:]:
+                            candidate = self._convert_value(token, parameter_values)
+                            if candidate is not None:
+                                converted_value = candidate
+                                raw_value = token
+                                break
                     if converted_value is None:
                         # Fall back to the last token
                         raw_value = tokens[-1]
