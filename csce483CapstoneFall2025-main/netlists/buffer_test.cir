@@ -1,0 +1,8 @@
+* Simple RC buffer driven by a pulse
+V1 in 0 PULSE(0 5 0 1e-6 1e-6 1e-3 2e-3)
+RIN in mid 10k
+COUT mid 0 100n
+ROUT mid out 1k
+RLOAD out 0 10k
+.PRINT TRAN V(out)
+.END

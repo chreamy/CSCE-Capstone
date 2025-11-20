@@ -118,8 +118,19 @@ class Netlist:
                         scope=scope,
                     ))
                 elif leading_char in {"V", "I"}:
-                    raw_value = tokens[3] if len(tokens) >= 4 else tokens[-1]
-                    converted_value = self._convert_value(raw_value, parameter_values)
+                    # Try to find a numeric token (handle sources like "V1 node0 0 DC 3.3")
+                    raw_value = None
+                    converted_value = None
+                    for token in reversed(tokens[3:]):
+                        candidate = self._convert_value(token, parameter_values)
+                        if candidate is not None:
+                            converted_value = candidate
+                            raw_value = token
+                            break
+                    if converted_value is None:
+                        # Fall back to the last token
+                        raw_value = tokens[-1]
+                        converted_value = self._convert_value(raw_value, parameter_values)
                     components.append(Component(
                         name=tokens[0],
                         type=leading_char,
@@ -144,7 +155,7 @@ class Netlist:
                 return
 
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8-sig") as file:
                 for raw_line in file:
                     stripped = raw_line.strip()
                     if not stripped:
@@ -167,7 +178,7 @@ class Netlist:
 
     def class_to_file(self, file_path):
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8-sig") as file:
                 data = file.readlines()
 
             modified_components = []
@@ -203,16 +214,30 @@ class Netlist:
                         break
                 updated_lines.append(line)
 
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.writelines(updated_lines)
         except FileNotFoundError:
             print("Error: The file '%s' was not found." % file_path)
         except Exception as exc:
             print("An error occurred: %s" % exc)
 
-    def writeTranCmdsToFile(self, file_path, initial_step_value, final_time_value, start_time_value, step_ceiling_value, target_node, constrained_nodes):
+    def writeTranCmdsToFile(
+        self,
+        file_path,
+        initial_step_value,
+        final_time_value,
+        start_time_value,
+        step_ceiling_value,
+        target_node,
+        constrained_nodes,
+        override_tstep=None,
+        override_tstop=None,
+        override_tstart=None,
+        override_max_step=None,
+        use_uic=False,
+    ):
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8-sig") as file:
                 data = file.readlines()
 
             filtered_lines = []
@@ -229,19 +254,25 @@ class Netlist:
                     continue
                 filtered_lines.append(line)
 
+            tstep = override_tstep if override_tstep is not None else initial_step_value
+            tstop = override_tstop if override_tstop is not None else final_time_value
+            tstart = override_tstart if override_tstart is not None else start_time_value
+            tmax = override_max_step if override_max_step is not None else step_ceiling_value
+
+            parts = [self._format_literal(tstep), self._format_literal(tstop)]
+            parts.append(self._format_literal(tstart))
+            parts.append(self._format_literal(tmax))
+            if use_uic:
+                parts.append("UIC")
+
             print_command_string = ".PRINT TRAN %s %s\n" % (target_node, " ".join(constrained_nodes))
-            tran_command_string = ".TRAN %ss %ss %ss %ss\n" % (
-                initial_step_value,
-                final_time_value,
-                start_time_value,
-                step_ceiling_value,
-            )
+            tran_command_string = ".TRAN %s\n" % (" ".join(parts))
 
             insertion_index = self._find_analysis_insert_index(filtered_lines)
             filtered_lines.insert(insertion_index, tran_command_string)
             filtered_lines.insert(insertion_index + 1, print_command_string)
 
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.writelines(filtered_lines)
         except FileNotFoundError:
             print("Error: The file '%s' was not found." % file_path)
@@ -259,7 +290,7 @@ class Netlist:
         input_source,
     ):
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8-sig") as file:
                 data = file.readlines()
 
             filtered_lines = []
@@ -302,7 +333,7 @@ class Netlist:
             filtered_lines.insert(insertion_index, noise_command_string)
             filtered_lines.insert(insertion_index + 1, print_command_string)
 
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.writelines(filtered_lines)
         except FileNotFoundError:
             print("Error: The file '%s' was not found." % file_path)
@@ -311,7 +342,7 @@ class Netlist:
 
     def writeAcCmdsToFile(self, file_path, sweep_type, points_per_interval, start_frequency, stop_frequency, print_variables):
         try:
-            with open(file_path, "r") as file:
+            with open(file_path, "r", encoding="utf-8-sig") as file:
                 data = file.readlines()
 
             filtered_lines = []
@@ -358,7 +389,7 @@ class Netlist:
             filtered_lines.insert(insertion_index, ac_command_string)
             filtered_lines.insert(insertion_index + 1, print_command_string)
 
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.writelines(filtered_lines)
         except FileNotFoundError:
             print("Error: The file '%s' was not found." % file_path)

@@ -45,6 +45,7 @@ class OptimizationSettingsWindow(tk.Frame):
             self.controller.get_app_data("analysis_type") or "transient"
         ).lower()
         stored_ac_settings = self.controller.get_app_data("ac_settings") or {}
+        stored_tran_settings = self.controller.get_app_data("tran_settings") or {}
         stored_noise_settings = self.controller.get_app_data("noise_settings") or {}
         self.source_names = list(self.controller.get_app_data("source_names") or [])
         def _as_float(value, default):
@@ -89,6 +90,14 @@ class OptimizationSettingsWindow(tk.Frame):
         }
         if self.noise_settings["quantity"] not in {"onoise", "onoise_db", "inoise", "inoise_db"}:
             self.noise_settings["quantity"] = "onoise"
+
+        self.tran_settings = {
+            "tstop": _as_float(stored_tran_settings.get("tstop"), None),
+            "tstep": _as_float(stored_tran_settings.get("tstep"), None),
+            "tstart": _as_float(stored_tran_settings.get("tstart"), None),
+            "max_step": _as_float(stored_tran_settings.get("max_step"), None),
+            "uic": bool(stored_tran_settings.get("uic", False)),
+        }
 
         # --- Now build the lists ---
         self.node_voltage_expressions = [
@@ -239,6 +248,37 @@ class OptimizationSettingsWindow(tk.Frame):
             self.noise_details_frame, textvariable=self.noise_summary_var
         )
         self.noise_summary_label.pack(side=tk.LEFT, anchor=tk.W, padx=5)
+
+        # Transient (.TRAN) configuration fields (shown only for Transient)
+        self.tran_frame = create_card(main_frame)
+        tran_inner = self.tran_frame.inner
+        tran_inner.columnconfigure(1, weight=1)
+        tk.Label(
+            tran_inner,
+            text="Transient (.TRAN) Settings",
+            font=FONTS["subheading"],
+            bg=COLORS["bg_secondary"],
+            fg=COLORS["text_primary"],
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 6))
+        # Stop time
+        tk.Label(tran_inner, text="Stop time (s)", bg=COLORS["bg_secondary"], fg=COLORS["text_primary"]).grid(row=1, column=0, sticky=tk.W, pady=3)
+        self.tstop_var = tk.StringVar(value="" if self.tran_settings["tstop"] is None else str(self.tran_settings["tstop"]))
+        ttk.Entry(tran_inner, textvariable=self.tstop_var, width=18).grid(row=1, column=1, sticky=tk.W, pady=3)
+        # Time step (optional)
+        tk.Label(tran_inner, text="Time step (s)", bg=COLORS["bg_secondary"], fg=COLORS["text_primary"]).grid(row=2, column=0, sticky=tk.W, pady=3)
+        self.tstep_var = tk.StringVar(value="" if self.tran_settings["tstep"] is None else str(self.tran_settings["tstep"]))
+        ttk.Entry(tran_inner, textvariable=self.tstep_var, width=18).grid(row=2, column=1, sticky=tk.W, pady=3)
+        # Start time (optional)
+        tk.Label(tran_inner, text="Start time (s)", bg=COLORS["bg_secondary"], fg=COLORS["text_primary"]).grid(row=3, column=0, sticky=tk.W, pady=3)
+        self.tstart_var = tk.StringVar(value="" if self.tran_settings["tstart"] is None else str(self.tran_settings["tstart"]))
+        ttk.Entry(tran_inner, textvariable=self.tstart_var, width=18).grid(row=3, column=1, sticky=tk.W, pady=3)
+        # Max step (optional)
+        tk.Label(tran_inner, text="Max step (s)", bg=COLORS["bg_secondary"], fg=COLORS["text_primary"]).grid(row=4, column=0, sticky=tk.W, pady=3)
+        self.tmax_var = tk.StringVar(value="" if self.tran_settings["max_step"] is None else str(self.tran_settings["max_step"]))
+        ttk.Entry(tran_inner, textvariable=self.tmax_var, width=18).grid(row=4, column=1, sticky=tk.W, pady=3)
+        # UIC toggle
+        self.uic_var = tk.BooleanVar(value=self.tran_settings["uic"])
+        ttk.Checkbutton(tran_inner, text="Use Initial Conditions (UIC)", variable=self.uic_var).grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
 
         # # --- Settings Panels (Curve Fit) ---
         setting_panel_frame = ttk.Frame(main_frame)
@@ -498,6 +538,8 @@ class OptimizationSettingsWindow(tk.Frame):
                 self.noise_config_button.pack_forget()
             if self.noise_details_frame.winfo_ismapped():
                 self.noise_details_frame.pack_forget()
+            if self.tran_frame.winfo_ismapped():
+                self.tran_frame.pack_forget()
         elif self.analysis_type == "noise":
             if self.ac_config_button.winfo_ismapped():
                 self.ac_config_button.pack_forget()
@@ -507,6 +549,8 @@ class OptimizationSettingsWindow(tk.Frame):
                 self.noise_config_button.pack(side=tk.LEFT, pady=5)
             if not self.noise_details_frame.winfo_ismapped():
                 self.noise_details_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 5))
+            if self.tran_frame.winfo_ismapped():
+                self.tran_frame.pack_forget()
         else:
             if self.ac_config_button.winfo_ismapped():
                 self.ac_config_button.pack_forget()
@@ -516,6 +560,8 @@ class OptimizationSettingsWindow(tk.Frame):
                 self.noise_config_button.pack_forget()
             if self.noise_details_frame.winfo_ismapped():
                 self.noise_details_frame.pack_forget()
+            if not self.tran_frame.winfo_ismapped():
+                self.tran_frame.pack(fill=tk.X, padx=32, pady=(0, 8))
 
     def open_ac_settings(self):
         dialog = AcSettingsDialog(self, self.ac_settings)
@@ -682,11 +728,43 @@ class OptimizationSettingsWindow(tk.Frame):
     def go_back(self):
         self.controller.navigate("parameter_selection")
 
+    def _collect_tran_settings(self) -> Optional[Dict[str, Optional[float]]]:
+        if self.analysis_type != "transient":
+            return {}
+
+        def _parse_optional(var: tk.StringVar, label: str) -> Optional[float]:
+            raw = (var.get() or "").strip()
+            if raw == "":
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                messagebox.showerror("Invalid Input", f"Please enter a numeric value for {label}.")
+                return None
+
+        tstop = _parse_optional(self.tstop_var, "Stop time")
+        if tstop is None:
+            # Stop time is required; empty or invalid aborts
+            messagebox.showerror("Stop Time Required", "Please provide a stop time for transient analysis.")
+            return None
+
+        tstep = _parse_optional(self.tstep_var, "Time step")
+        tstart = _parse_optional(self.tstart_var, "Start time")
+        tmax = _parse_optional(self.tmax_var, "Max step")
+        return {
+            "tstop": tstop,
+            "tstep": tstep,
+            "tstart": tstart,
+            "max_step": tmax,
+            "uic": bool(self.uic_var.get()),
+        }
+
     def go_forward(self):
         # --- Get all constraints (they now include the 'type' key) ---
         all_constraints = (
             self.constraints
         )  # List of dicts like {'left': 'R1', ..., 'type': 'parameter'}
+        generated_data = self.controller.get_app_data("generated_data") or []
 
         # --- Separate constraints by type ---
         parameter_constraints = [
@@ -711,6 +789,12 @@ class OptimizationSettingsWindow(tk.Frame):
             "optimization_type": self.optimization_type_var.get(),
             "constraints": self.constraints,
         }
+        if not generated_data:
+            messagebox.showerror(
+                "Target Required",
+                "Please define or import a target curve before starting the optimization.",
+            )
+            return
         curve_settings = self.curve_fit_settings.get_settings()
         noise_output_node = curve_settings.pop("noise_output_node", None)
         noise_quantity = curve_settings.get("noise_quantity")
@@ -722,6 +806,7 @@ class OptimizationSettingsWindow(tk.Frame):
                 self.ac_settings["response"] = ac_response
             optimization_settings["ac_settings"] = dict(self.ac_settings)
             optimization_settings["noise_settings"] = {}
+            optimization_settings["tran_settings"] = {}
         elif self.analysis_type == "noise":
             if noise_output_node:
                 self.noise_settings["output_node"] = noise_output_node
@@ -742,14 +827,19 @@ class OptimizationSettingsWindow(tk.Frame):
             optimization_settings["ac_settings"] = {}
             optimization_settings["noise_settings"] = dict(self.noise_settings)
         else:
+            tran_settings = self._collect_tran_settings()
+            if tran_settings is None:
+                return
             optimization_settings["ac_settings"] = {}
             optimization_settings["noise_settings"] = {}
+            optimization_settings["tran_settings"] = tran_settings
 
         print("AC settings before run:", optimization_settings.get("ac_settings"))
 
         self.controller.update_app_data("analysis_type", self.analysis_type)
         self.controller.update_app_data("ac_settings", self.ac_settings)
         self.controller.update_app_data("noise_settings", self.noise_settings)
+        self.controller.update_app_data("tran_settings", optimization_settings.get("tran_settings", {}))
 
         self.controller.update_app_data("optimization_settings", optimization_settings)
         self.controller.update_app_data(
