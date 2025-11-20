@@ -732,25 +732,37 @@ class OptimizationSettingsWindow(tk.Frame):
         if self.analysis_type != "transient":
             return {}
 
-        def _parse_optional(var: tk.StringVar, label: str) -> Optional[float]:
+        def _parse_optional(var: tk.StringVar, label: str) -> (Optional[float], Optional[str]):
             raw = (var.get() or "").strip()
             if raw == "":
-                return None
+                return None, None
             try:
-                return float(raw)
+                return float(raw), None
             except ValueError:
-                messagebox.showerror("Invalid Input", f"Please enter a numeric value for {label}.")
-                return None
+                return None, label
 
-        tstop = _parse_optional(self.tstop_var, "Stop time")
+        invalid_fields = []
+        tstop, tstop_err = _parse_optional(self.tstop_var, "Stop time")
         if tstop is None:
             # Stop time is required; empty or invalid aborts
-            messagebox.showerror("Stop Time Required", "Please provide a stop time for transient analysis.")
-            return None
+            if tstop_err is not None:
+                invalid_fields.append("Stop time")
+            else:
+                messagebox.showerror("Stop Time Required", "Please provide a stop time for transient analysis.")
+                return None
 
-        tstep = _parse_optional(self.tstep_var, "Time step")
-        tstart = _parse_optional(self.tstart_var, "Start time")
-        tmax = _parse_optional(self.tmax_var, "Max step")
+        tstep, tstep_err = _parse_optional(self.tstep_var, "Time step")
+        tstart, tstart_err = _parse_optional(self.tstart_var, "Start time")
+        tmax, tmax_err = _parse_optional(self.tmax_var, "Max step")
+        for label, err in [("Time step", tstep_err), ("Start time", tstart_err), ("Max step", tmax_err)]:
+            if err is not None:
+                invalid_fields.append(label)
+        if invalid_fields:
+            messagebox.showerror(
+                "Invalid Input",
+                "Please enter a numeric value for: " + ", ".join(invalid_fields)
+            )
+            return None
         return {
             "tstop": tstop,
             "tstep": tstep,
