@@ -223,7 +223,7 @@ def curvefit_optimize(
                 warning_msg = f"Warning: Clipping {np.sum(out_of_bounds)} point(s) outside target domain [{min_x}, {max_x}]."
                 log_to_file(warning_msg)
                 if queue is not None:
-                    queue.put(warning_msg)
+                    queue.put(("Log", warning_msg))
                 arr = np.clip(arr, min_x, max_x)
             return _raw_interp(arr)
 
