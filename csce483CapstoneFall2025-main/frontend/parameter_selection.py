@@ -309,7 +309,11 @@ class ParameterSelectionWindow(tk.Frame):
 
     @staticmethod
     def _is_source_component(component: Component) -> bool:
-        """Returns True when the component represents a voltage or current source."""
+        """
+        Returns True when the component represents an independent voltage or current source
+        (i.e., type "V" or "I" in SPICE netlists). Does not include dependent sources such as
+        VCVS, VCCS, CCCS, or CCVS.
+        """
         comp_type = getattr(component, "type", "")
         return str(comp_type).upper() in {"V", "I"}
 
