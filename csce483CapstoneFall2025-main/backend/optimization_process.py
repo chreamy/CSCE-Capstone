@@ -3,7 +3,11 @@ import os
 import shutil
 import re
 import numpy as np
-from backend.curvefit_optimization import curvefit_optimize, get_current_session_number
+from backend.curvefit_optimization import (
+    calculate_session_paths,
+    curvefit_optimize,
+    get_current_session_number,
+)
 
 _MIN_SWEEP_FREQ = 1e-12  # Prevent zero-frequency AC/Noise sweeps
 _DB_FLOOR = 1e-30
@@ -134,7 +138,7 @@ def add_node_constraints(constraints, analysis_type="transient", ac_response="ma
     return formatted
 
 
-def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds):
+def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds, xyce_executable_path=None):
     original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
     try:
         constraints = (curveData or {}).get("constraints", [])
@@ -236,9 +240,8 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
         x_parameter = str(x_parameter).strip().upper()
 
         session_num = get_current_session_number()
-        session_dir = os.path.join("runs", str(session_num))
-        if not os.path.exists(session_dir):
-            os.makedirs(session_dir)
+        _, group_dir, session_dir = calculate_session_paths(session_num, "runs")
+        os.makedirs(session_dir, exist_ok=True)
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
 
         NODE_CONSTRAINTS = add_node_constraints(constraints, analysis_type, ac_response)
@@ -429,6 +432,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             x_parameter=x_parameter,
             ac_response=ac_response,
             noise_settings=noise_settings if analysis_type == "noise" else None,
+            xyce_executable_path=xyce_executable_path,
         )
 
         NETLIST.file_path = ORIG_NETLIST_PATH

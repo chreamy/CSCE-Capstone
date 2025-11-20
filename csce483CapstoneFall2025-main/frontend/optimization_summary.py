@@ -1,3 +1,4 @@
+import os
 import tkinter as tk
 from tkinter import ttk
 import queue
@@ -63,7 +64,13 @@ class OptimizationSummary(tk.Frame):
         self._build_plot()
         
         self.parent.after(100, self.update_ui)
-        self.start_optimization()
+        
+        # Only start optimization if we don't have existing results (i.e., first time here)
+        if self.controller.get_app_data("optimization_results") is None:
+            self.start_optimization()
+        else:
+            # Returning from history - show the existing results
+            self._show_completed_state()
         
         # Bind window resize event to maintain proper layout
         self.parent.bind('<Configure>', self._on_window_resize)
@@ -302,6 +309,22 @@ class OptimizationSummary(tk.Frame):
         )
         self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
         
+        # History button
+        self.history_button = tk.Button(
+            self.results_buttons_frame,
+            text="View History",
+            font=("Segoe UI", 12),
+            bg=self.COLORS['bg_tertiary'],
+            fg=self.COLORS['text_primary'],
+            bd=1,
+            relief=tk.FLAT,
+            padx=25,
+            pady=12,
+            command=self.show_history,
+            cursor="hand2"
+        )
+        self.history_button.pack(side=tk.LEFT, padx=(0, 10))
+        
         # Close button
         self.close_button = tk.Button(
             self.results_buttons_frame,
@@ -320,6 +343,7 @@ class OptimizationSummary(tk.Frame):
         
         # Initialize with computing state
         self._show_computing_state()
+        self._update_history_button_state()
 
     def _show_computing_state(self):
         """Show the computing state with loading indicator"""
@@ -554,6 +578,7 @@ class OptimizationSummary(tk.Frame):
         self.selectedParameters = self.controller.get_app_data("selected_parameters")
         self.optimizationTolerances = self.controller.get_app_data("optimization_tolerances")
         self.RLCBounds = self.controller.get_app_data("RLC_bounds")
+        self.xyceExecutablePath = self.controller.get_app_data("xyce_executable_path")
         self.analysis_type = (self.curveData.get("analysis_type") or "transient").lower()
         self.ac_settings = self.curveData.get("ac_settings") or {}
         self.ac_response = (self.ac_settings.get("response") or "magnitude").lower()
@@ -652,6 +677,45 @@ class OptimizationSummary(tk.Frame):
         self.canvas.draw()
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
 
+    def _show_completed_state(self) -> None:
+        """Show the optimization complete state with existing results"""
+        self.optimization_active = False
+        self.status_label.config(text="Optimization Complete", fg=self.COLORS['success'])
+        
+        # Get existing results
+        results = self.controller.get_app_data("optimization_results")
+        if results:
+            self._show_results_state(results)
+        
+        # Show restart button
+        self.back_to_settings_button.pack_forget()
+        self.restart_button.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Load the final optimized curve if available
+        self._update_target_plot()
+        self._update_history_button_state()
+
+    def _history_available(self) -> bool:
+        """Determine if there is any history to show."""
+        runs_dir = "runs"
+        has_runs = False
+        try:
+            if os.path.exists(runs_dir):
+                has_runs = any(os.scandir(runs_dir))
+        except OSError:
+            has_runs = False
+        return self.controller.get_app_data("optimization_results") is not None or has_runs
+
+    def _update_history_button_state(self) -> None:
+        """Enable history navigation only when idle and history exists."""
+        if not hasattr(self, "history_button"):
+            return
+        if self.optimization_active:
+            state = tk.DISABLED
+        else:
+            state = tk.NORMAL if self._history_available() else tk.DISABLED
+        self.history_button.config(state=state)
+
     def start_optimization(self) -> None:
         self._ensure_convergence_window()
         if getattr(self, "convergence_label", None):
@@ -662,12 +726,15 @@ class OptimizationSummary(tk.Frame):
         self._latest_simulation = None
         if self.thread and self.thread.is_alive():
             return
+        # Clear any previous results so a fresh run will start
+        self.controller.update_app_data("optimization_results", None)
         self._load_context()
         self._prepare_target_data()
         self._update_target_plot()
         self.back_to_settings_button.config(state=tk.DISABLED)
         self._graph_update_counter = 0
         self.optimization_active = True
+        self._update_history_button_state()
         self._reset_status_view()
         self.queue = queue.Queue()
         self.thread = th.Thread(
@@ -681,6 +748,7 @@ class OptimizationSummary(tk.Frame):
                 self.selectedParameters,
                 self.optimizationTolerances,
                 self.RLCBounds,
+                self.xyceExecutablePath,
             ),
         )
         self.thread.daemon = True
@@ -723,6 +791,8 @@ class OptimizationSummary(tk.Frame):
         """Restart from netlist upload step"""
         self._cleanup_worker()
         self._destroy_convergence_window()
+        # Clear prior results so the next run starts cleanly
+        self.controller.update_app_data("optimization_results", None)
         # Navigate back to netlist uploader to start fresh
         self.controller.navigate("netlist_uploader")
 
@@ -794,6 +864,8 @@ class OptimizationSummary(tk.Frame):
         if not self.optimization_active:
             self._cleanup_worker()
 
+        self._update_history_button_state()
+
         # Continue the update loop every 100ms
         self.parent.after(100, self.update_ui)
 
@@ -856,6 +928,11 @@ class OptimizationSummary(tk.Frame):
                 pass
         
         self.canvas.draw()
+
+    def show_history(self) -> None:
+        """Navigate to history view"""
+        self._destroy_convergence_window()
+        self.controller.navigate("optimization_history")
 
     def close_window(self) -> None:
         self._destroy_convergence_window()
