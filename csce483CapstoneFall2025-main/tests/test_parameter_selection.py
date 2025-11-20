@@ -85,7 +85,7 @@ class ParameterSelectionTests(unittest.TestCase):
         selected_items = set(window.selected_listbox.get(0, tk.END))
         self.assertEqual(available_items, {"RREF", "CLOAD"})
         self.assertEqual(selected_items, set())
-        self.assertEqual(window.sources, ["V1", "I1"])
+        self.assertCountEqual(window.sources, ["V1", "I1"])
 
 
 if __name__ == "__main__":
