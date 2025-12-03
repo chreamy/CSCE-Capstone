@@ -180,21 +180,26 @@ class OptimizationHistoryWindow(tk.Frame):
         self.current_session_path: Optional[str] = None
         self.load_sessions()
 
+    def _runs_root(self) -> str:
+        """Mirror backend workspace resolution so history finds the same runs."""
+        return os.path.abspath(os.environ.get("XYCLOPS_WORKSPACE") or "runs")
+
     def load_sessions(self) -> None:
         """Scan runs directory and populate the tree."""
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        runs_dir = "runs"
-        if not os.path.exists(runs_dir):
+        runs_root = self._runs_root()
+        results_root = os.path.join(runs_root, "netlist-results")
+        if not os.path.exists(results_root):
             self.tree.insert("", "end", text="No runs found", values=("", "", ""))
             return
 
         try:
-            group_folders = [
+            netlist_folders = [
                 folder
-                for folder in os.listdir(runs_dir)
-                if os.path.isdir(os.path.join(runs_dir, folder)) and "-" in folder
+                for folder in os.listdir(results_root)
+                if os.path.isdir(os.path.join(results_root, folder))
             ]
         except Exception as e:
             traceback.print_exc()
@@ -202,11 +207,15 @@ class OptimizationHistoryWindow(tk.Frame):
             self.tree.insert("", "end", text=f"Error: {type(e).__name__}", values=("", "", ""))
             return
 
-        group_folders.sort(key=lambda x: int(x.split("-")[0]))
+        if not netlist_folders:
+            self.tree.insert("", "end", text="No runs found", values=("", "", ""))
+            return
 
-        for group_folder in group_folders:
-            group_path = os.path.join(runs_dir, group_folder)
-            group_node = self.tree.insert("", "end", text=group_folder, values=("", "", ""), open=False)
+        netlist_folders.sort()
+
+        for netlist_folder in netlist_folders:
+            group_path = os.path.join(results_root, netlist_folder)
+            group_node = self.tree.insert("", "end", text=netlist_folder, values=("", "", ""), open=False)
 
             try:
                 session_dirs = []
@@ -258,7 +267,7 @@ class OptimizationHistoryWindow(tk.Frame):
                     )
             except Exception as e:
                 traceback.print_exc()
-                messagebox.showerror("Error", f"Failed to load session group '{group_folder}':\n{e}")
+                messagebox.showerror("Error", f"Failed to load session group '{netlist_folder}':\n{e}")
                 self.tree.insert(group_node, "end", text=f"Error: {type(e).__name__}", values=("", "", ""))
 
     def on_session_select(self, event) -> None:
@@ -431,7 +440,7 @@ class OptimizationHistoryWindow(tk.Frame):
             return
 
         try:
-            runs_dir = "runs"
+            runs_dir = self._runs_root()
             if os.path.exists(runs_dir):
                 for item in os.listdir(runs_dir):
                     item_path = os.path.join(runs_dir, item)

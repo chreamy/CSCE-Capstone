@@ -100,11 +100,52 @@ class NetlistUploaderWindow(tk.Frame):
         self.continue_button.configure(state=tk.DISABLED)
         self.continue_button.pack(side=tk.RIGHT)
 
+    def _reset_session_state(self) -> None:
+        """Clear shared state that should not leak between different netlists."""
+        defaults = {
+            "selected_parameters": [],
+            "netlist_object": None,
+            "netlist_includes": [],
+            "generated_data": [],
+            "optimization_results": None,
+            "optimization_settings": {},
+            "pending_start": False,
+            "nodes": set(),
+            "source_names": [],
+            "analysis_type": "transient",
+            "ac_settings": {
+                "sweep_type": "DEC",
+                "points": 10,
+                "start_frequency": 1.0,
+                "stop_frequency": 1e6,
+                "response": "magnitude",
+            },
+            "tran_settings": {
+                "tstop": None,
+                "tstep": None,
+                "tstart": None,
+                "max_step": None,
+                "uic": False,
+            },
+            "noise_settings": {
+                "sweep_type": "DEC",
+                "points": 10,
+                "start_frequency": 1.0,
+                "stop_frequency": 1e6,
+                "output_node": "",
+                "input_source": "",
+                "quantity": "onoise",
+            },
+        }
+        for key, value in defaults.items():
+            self.controller.update_app_data(key, value)
+
     def upload_netlist(self) -> None:
         """Handles the netlist upload process."""
         file_path = open_file_dialog()
         if file_path:
             self.netlist_path = file_path
+            self._reset_session_state()
             self.controller.update_app_data("netlist_path", self.netlist_path)
             self.status_label.config(
                 text=f"Netlist ready: {self.netlist_path}",

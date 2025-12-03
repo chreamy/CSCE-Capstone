@@ -343,10 +343,11 @@ def open_heaviside_editor(owner, a_init, t0_init, x1_init, on_change=None, on_ap
 # ------------------------
 # PIECEWISE-LINEAR editor
 # ------------------------
-def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=None, axis_labels=None, constraint_left_options=None, current_y_signal=None):
+def open_piecewise_editor(owner, pts_init, on_change=None, on_apply=None, on_save_constraint=None, axis_labels=None, constraint_left_options=None, current_y_signal=None):
     """
     pts_init : list[(x,y)]
     on_change(new_pts) called whenever points change (drag, insert, remove, apply)
+    on_apply(new_pts) called when the user clicks Apply/Use in target
     """
     win = tk.Toplevel(owner)
     win.title("Piecewise Linear Editor")
@@ -381,6 +382,7 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
     autoscale = tk.BooleanVar(value=True)  # NEW: default ON for PWL
     ttk.Checkbutton(bar, text="Auto-rescale", variable=autoscale, style="TCheckbutton").pack(side=tk.LEFT, padx=(4,6))  # NEW
     ttk.Button(bar, text="Fit", command=lambda: _redraw(rescale=True, emit=False), style="Secondary.TButton").pack(side=tk.LEFT, padx=(2,10))  # NEW
+    create_primary_button(bar, text="Apply to Target", command=lambda: _apply_current()).pack(side=tk.RIGHT, padx=(8, 0))
 
     bar = LegacyConstraintsBar(
         parent=win,                         # or the frame/shell holding your buttons
@@ -469,6 +471,11 @@ def open_piecewise_editor(owner, pts_init, on_change=None, on_save_constraint=No
 
     def _emit():
         if on_change: on_change(list(pts))
+
+    def _apply_current():
+        _emit()
+        if callable(on_apply):
+            on_apply(list(pts))
 
     def _selected_index():
         sel = table.selection()

@@ -7,6 +7,7 @@ import glob
 from datetime import datetime
 from typing import Optional, Dict, Any
 from threading import Event
+from pathlib import Path
 from scipy.optimize import least_squares
 from scipy.interpolate import interp1d
 from backend.xyce_parsing_function import parse_xyce_prn_output
@@ -23,6 +24,19 @@ def _convert_array_to_db(values: np.ndarray) -> np.ndarray:
     """Convert magnitude array to dB using a safe numeric floor."""
     return 20.0 * np.log10(np.maximum(values, _SMALL_POSITIVE))
 
+
+def _downsample_pairs(x_values: np.ndarray, y_values: np.ndarray, max_points: int = 5000) -> tuple[np.ndarray, np.ndarray]:
+    """Reduce a dense waveform to a manageable size while keeping endpoints."""
+    if len(x_values) <= max_points:
+        return x_values, y_values
+    step = max(1, len(x_values) // max_points)
+    x_ds = x_values[::step]
+    y_ds = y_values[::step]
+    if x_ds[-1] != x_values[-1]:
+        x_ds = np.append(x_ds, x_values[-1])
+        y_ds = np.append(y_ds, y_values[-1])
+    return x_ds, y_ds
+
 def calculate_session_paths(session_num: int, runs_dir: str = "runs") -> tuple[str, str, str]:
     """Return (group_folder, group_dir, session_dir) for a given session number."""
     group_start = ((session_num - 1) // 10) * 10 + 1
@@ -31,6 +45,29 @@ def calculate_session_paths(session_num: int, runs_dir: str = "runs") -> tuple[s
     group_dir = os.path.join(runs_dir, group_folder)
     session_dir = os.path.join(group_dir, str(session_num))
     return group_folder, group_dir, session_dir
+
+
+def _workspace_root(runs_dir: Optional[str] = None) -> str:
+    """Resolve the base folder for optimization artifacts."""
+    root = runs_dir or os.environ.get("XYCLOPS_WORKSPACE") or "runs"
+    return os.path.abspath(root)
+
+
+def _netlist_results_dir(netlist_path: Optional[str], runs_dir: Optional[str] = None) -> str:
+    """Build the per-netlist results directory."""
+    runs_root = _workspace_root(runs_dir)
+    netlist_name = Path(netlist_path).stem if netlist_path else "default-netlist"
+    return os.path.join(runs_root, "netlist-results", netlist_name)
+
+
+def calculate_session_paths_v2(session_num: int, *, netlist_path: Optional[str], runs_dir: Optional[str] = None) -> tuple[str, str, str]:
+    """
+    Return (netlist_name, netlist_dir, session_dir) using the workspace-aware layout.
+    Example: <workspace>/netlist-results/<netlist-name>/<session_num>
+    """
+    netlist_dir = _netlist_results_dir(netlist_path, runs_dir)
+    session_dir = os.path.join(netlist_dir, str(session_num))
+    return os.path.basename(netlist_dir), netlist_dir, session_dir
 
 def log_to_file(message: str, log_file: str = None):
     """Write log message to log file."""
@@ -44,55 +81,43 @@ def log_and_append(message: str, run_info: list, queue, log_file: str = None):
     run_info.append(message)
     queue.put(("Log", message))
 
-def get_session_log_file(session_num: Optional[int] = None):
+def get_session_log_file(session_num: Optional[int] = None, netlist_path: Optional[str] = None):
     """
     Get the session log file path.
     If session_num is provided, reuse that session directory instead of creating a new one.
     """
-    import os
-    
-    runs_dir = "runs"
-    os.makedirs(runs_dir, exist_ok=True)
-    
+    runs_root = _workspace_root()
+    os.makedirs(runs_root, exist_ok=True)
+
     if session_num is not None:
-        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
+        _, _, session_dir = calculate_session_paths_v2(session_num, netlist_path=netlist_path, runs_dir=runs_root)
         os.makedirs(session_dir, exist_ok=True)
         return os.path.join(session_dir, "session.log")
-    
-    # Find the next available session number
-    session_num = 1
-    while True:
-        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
-        log_file = os.path.join(session_dir, "session.log")
-        
-        if not os.path.exists(log_file):
-            os.makedirs(session_dir, exist_ok=True)
-            break
-        session_num += 1
-    
-    return log_file
 
-def get_current_session_number():
-    """Get the current session number (same logic as get_session_log_file but returns just the number)."""
-    import os
-    
-    # Create runs directory if it doesn't exist
-    runs_dir = "runs"
-    os.makedirs(runs_dir, exist_ok=True)
-    
-    # Find the next available session number
-    session_num = 1
-    while True:
-        _, _, session_dir = calculate_session_paths(session_num, runs_dir)
-        log_file = os.path.join(session_dir, "session.log")
-        
-        if not os.path.exists(log_file):
-            # Create the session directory
-            os.makedirs(session_dir, exist_ok=True)
-            break
-        session_num += 1
-    
-    return session_num
+    session_num = get_current_session_number(netlist_path)
+    _, _, session_dir = calculate_session_paths_v2(session_num, netlist_path=netlist_path, runs_dir=runs_root)
+    os.makedirs(session_dir, exist_ok=True)
+    return os.path.join(session_dir, "session.log")
+
+
+def get_current_session_number(netlist_path: Optional[str] = None):
+    """Get the next session number for the provided netlist (per-workspace)."""
+    runs_root = _workspace_root()
+    os.makedirs(runs_root, exist_ok=True)
+    netlist_dir = _netlist_results_dir(netlist_path, runs_root)
+    os.makedirs(netlist_dir, exist_ok=True)
+
+    existing = []
+    for entry in os.listdir(netlist_dir):
+        full_path = os.path.join(netlist_dir, entry)
+        if not os.path.isdir(full_path):
+            continue
+        try:
+            existing.append(int(entry))
+        except (TypeError, ValueError):
+            continue
+
+    return (max(existing) + 1) if existing else 1
 
 """
 Two constraint types:
@@ -127,6 +152,7 @@ def curvefit_optimize(
     xyce_executable_path: Optional[str] = None,
     stop_event: Optional[Event] = None,
     session_num: Optional[int] = None,
+    netlist_path: Optional[str] = None,
 ) -> None:
     """
     Run the curve-fitting optimization for the requested analysis mode.
@@ -150,7 +176,7 @@ def curvefit_optimize(
             raise AbortOptimization()
 
     # Get the session log file path
-    session_log_file = get_session_log_file(session_num)
+    session_log_file = get_session_log_file(session_num, netlist_path)
     _check_abort()
     
     analysis_mode = (analysis_type or "transient").strip().lower()
@@ -378,14 +404,21 @@ def curvefit_optimize(
                 log_and_append(f"  {comp.name}: {comp.value} (variable={comp.variable}, modified={comp.modified})", run_info, queue, session_log_file)
             
             # Run Xyce with full output capture
-            process = subprocess.run(
-                [xyce_command, "-delim", "COMMA", local_netlist_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
+            try:
+                process = subprocess.run(
+                    [xyce_command, "-delim", "COMMA", local_netlist_file],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            except OSError as e:
+                message = f"Failed to launch Xyce at '{xyce_command}': {e}"
+                log_and_append(message, run_info, queue, session_log_file)
+                if queue is not None:
+                    queue.put(("Failed", message))
+                raise
             _check_abort()
-            
+
             # Store Xyce output (filter out time-related messages and only log specific percent complete milestones)
             log_and_append("Xyce stdout:", run_info, queue, session_log_file)
             for line in process.stdout.split('\n'):
@@ -434,6 +467,14 @@ def curvefit_optimize(
                     else:
                         # Log all other non-time-related messages
                         log_and_append(f"  {line}", run_info, queue, session_log_file)
+
+            if process.returncode != 0:
+                err_text = process.stderr.strip() or process.stdout.strip() or f"Exit code {process.returncode}"
+                message = f"Xyce exited with an error: {err_text}"
+                log_and_append(message, run_info, queue, session_log_file)
+                if queue is not None:
+                    queue.put(("Failed", message))
+                raise RuntimeError(message)
             
             # Store parsing attempt
             output_file = _resolve_output_file(local_netlist_file)
@@ -495,27 +536,52 @@ def curvefit_optimize(
                 if response_mode and response_mode.endswith("_db"):
                     Y_ARRAY_FROM_XYCE = 20.0 * np.log10(np.maximum(Y_ARRAY_FROM_XYCE, 1e-30))
 
+            overlap_start = max(float(min_x), float(np.min(X_ARRAY_FROM_XYCE)))
+            overlap_end = min(float(max_x), float(np.max(X_ARRAY_FROM_XYCE)))
+            if overlap_end <= overlap_start:
+                raise ValueError("Simulation output does not overlap the target function window. Adjust your .TRAN/.AC settings.")
+
+            window_mask = (X_ARRAY_FROM_XYCE >= overlap_start) & (X_ARRAY_FROM_XYCE <= overlap_end)
+            X_ARRAY_IN_WINDOW = X_ARRAY_FROM_XYCE[window_mask]
+            Y_ARRAY_IN_WINDOW = Y_ARRAY_FROM_XYCE[window_mask]
+            if X_ARRAY_IN_WINDOW.size == 0:
+                raise ValueError("Simulation produced no data inside the target window.")
+
+            target_points_sorted = np.sort(x_ideal)
+            target_points_in_window = target_points_sorted[
+                (target_points_sorted >= overlap_start) & (target_points_sorted <= overlap_end)
+            ]
+
             if run_state["first_run"]:
                 run_state["first_run"] = False
-                run_state["master_x_points"] = X_ARRAY_FROM_XYCE
+                master_points = target_points_in_window if target_points_in_window.size > 0 else X_ARRAY_IN_WINDOW
+                if master_points.size > 5000:
+                    idxs = np.linspace(0, master_points.size - 1, 5000, dtype=int)
+                    master_points = master_points[idxs]
+                run_state["master_x_points"] = master_points
 
+            if run_state["master_x_points"].size == 0:
+                raise ValueError("No comparison points inside the target window.")
+
+            graph_x, graph_y = _downsample_pairs(X_ARRAY_IN_WINDOW, Y_ARRAY_IN_WINDOW, max_points=4000)
 
             # Send run count update for every run
             queue.put(("Update",f"total runs completed: {xyceRuns}"))
-            queue.put(("UpdateYData",(analysis_mode, response_mode, X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE))) 
+            queue.put(("UpdateYData",(analysis_mode, response_mode, graph_x, graph_y))) 
 
-            xyce_interpolation = interp1d(X_ARRAY_FROM_XYCE, Y_ARRAY_FROM_XYCE)
+            xyce_interpolation = interp1d(X_ARRAY_IN_WINDOW, Y_ARRAY_IN_WINDOW, bounds_error=False, fill_value="extrapolate")
 
             for node_name, windows in node_constraints.items():
                 _check_abort()
                 node_index = resolve_header_index(node_name, "Node variable")
                 node_values = np.array([float(x[node_index]) for x in xyce_parse[1]])
+                node_values = node_values[window_mask]
                 # Match AC dB behavior you already have
                 if analysis_mode == "ac" and response_mode == "magnitude_db" and node_name.startswith("VM("):
                     node_values = _convert_array_to_db(node_values)
 
                 # X axis values for masking windows
-                X_vals = X_ARRAY_FROM_XYCE  # already built above
+                X_vals = X_ARRAY_IN_WINDOW  # already built above
 
                 for w in windows:
                     lower = w.get("lower", None)

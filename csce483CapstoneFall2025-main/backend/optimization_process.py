@@ -5,7 +5,7 @@ import re
 import numpy as np
 from typing import Optional
 from backend.curvefit_optimization import (
-    calculate_session_paths,
+    calculate_session_paths_v2,
     curvefit_optimize,
     get_current_session_number,
     AbortOptimization,
@@ -143,7 +143,7 @@ def add_node_constraints(constraints, analysis_type="transient", ac_response="ma
 
 def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, selectedParameters, optimizationTolerances, RLCBounds, xyce_executable_path=None, stop_event: Optional[Event] = None):
     original_netlist_path = getattr(netlistObject, "file_path", netlistPath)
-    session_num = get_current_session_number()
+    session_num = get_current_session_number(original_netlist_path)
 
     def _check_abort():
         if stop_event and stop_event.is_set():
@@ -250,7 +250,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             x_parameter = "FREQ" if analysis_type in {"ac", "noise"} else "TIME"
         x_parameter = str(x_parameter).strip().upper()
 
-        _, group_dir, session_dir = calculate_session_paths(session_num, "runs")
+        _, group_dir, session_dir = calculate_session_paths_v2(session_num, netlist_path=original_netlist_path)
         os.makedirs(session_dir, exist_ok=True)
         WRITABLE_NETLIST_PATH = os.path.join(session_dir, "optimized.txt")
 
@@ -446,6 +446,7 @@ def optimizeProcess(queue, curveData, testRows, netlistPath, netlistObject, sele
             xyce_executable_path=xyce_executable_path,
             stop_event=stop_event,
             session_num=session_num,
+            netlist_path=ORIG_NETLIST_PATH,
         )
 
         NETLIST.file_path = ORIG_NETLIST_PATH
