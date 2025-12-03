@@ -746,11 +746,12 @@ class OptimizationSummary(tk.Frame):
 
     def _history_available(self) -> bool:
         """Determine if there is any history to show."""
-        runs_dir = "runs"
+        runs_dir = os.path.abspath(os.environ.get("XYCLOPS_WORKSPACE") or "runs")
+        results_root = os.path.join(runs_dir, "netlist-results")
         has_runs = False
         try:
-            if os.path.exists(runs_dir):
-                has_runs = any(os.scandir(runs_dir))
+            if os.path.exists(results_root):
+                has_runs = any(os.scandir(results_root))
         except OSError:
             has_runs = False
         return self.controller.get_app_data("optimization_results") is not None or has_runs

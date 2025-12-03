@@ -52,7 +52,7 @@ class CurveFitSettings(tk.Frame):
         self.visual_editor_bar.pack(fill=tk.X, padx=6, pady=(6, 0))
         self.open_editor_button = create_secondary_button(
             self.visual_editor_bar,
-            text="Open Visual Editor",
+            text="Visual Editor (select a type)",
             state=tk.DISABLED,
         )
         self.open_editor_button.pack(side=tk.LEFT)
@@ -63,6 +63,8 @@ class CurveFitSettings(tk.Frame):
 
         for frame in self.frames.values():
             frame.pack_forget()
+        # Show the default editor panel on load so the visual editor button makes sense
+        self.show_frame()
 
         # --- Target functions list + actions ---
         self.see_inputted_functions = ttk.Frame(self, style="Card.TFrame")
@@ -359,6 +361,7 @@ class CurveFitSettings(tk.Frame):
                 self,
                 list(self._pwl_points_buffer),
                 on_change=_on_change,
+                on_apply=self._apply_piecewise_from_editor,
                 on_save_constraint=self.push_constraint_from_editor,
                 axis_labels=self._current_axis_labels(),
                 constraint_left_options=self._constraint_left_options(),
@@ -388,8 +391,24 @@ class CurveFitSettings(tk.Frame):
                 self.inputs_completed_callback("function_button_pressed", True)
             self._rebuild_all_line_segments()
 
+        self._add_piecewise_callback = _add_piecewise
         create_primary_button(frame, text="Add Piecewise", command=_add_piecewise).pack(side=tk.LEFT, padx=10, pady=(2, 2))
         return frame
+
+    def _apply_piecewise_from_editor(self, points):
+        """Push the current visual editor points into the target list without extra clicks."""
+        try:
+            self._pwl_points_buffer = list(points)
+        except Exception:
+            return
+        # Ensure the UI reflects the piecewise workflow
+        try:
+            self.input_type_options.set("Piecewise Linear")
+        except Exception:
+            pass
+        add_cb = getattr(self, "_add_piecewise_callback", None)
+        if callable(add_cb):
+            add_cb()
 
     def show_frame(self):
         selected_frame = self.input_type_options.get()
@@ -399,11 +418,23 @@ class CurveFitSettings(tk.Frame):
             self.frames[selected_frame].pack(fill=tk.BOTH)
 
             if selected_frame == "Heaviside" and hasattr(self, "heaviside_open_editor_callback"):
-                self.open_editor_button.configure(command=self.heaviside_open_editor_callback, state=tk.NORMAL)
+                self.open_editor_button.configure(
+                    command=self.heaviside_open_editor_callback,
+                    state=tk.NORMAL,
+                    text="Visual Editor (Heaviside)",
+                )
             elif selected_frame == "Piecewise Linear" and hasattr(self, "piecewise_open_editor_callback"):
-                self.open_editor_button.configure(command=self.piecewise_open_editor_callback, state=tk.NORMAL)
+                self.open_editor_button.configure(
+                    command=self.piecewise_open_editor_callback,
+                    state=tk.NORMAL,
+                    text="Visual Editor (Piecewise)",
+                )
             else:
-                self.open_editor_button.configure(command=lambda: None, state=tk.DISABLED)
+                self.open_editor_button.configure(
+                    command=lambda: None,
+                    state=tk.DISABLED,
+                    text="Visual editor unavailable for uploads",
+                )
 
 
     def clear_existing_data(self):
