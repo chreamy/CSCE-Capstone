@@ -27,10 +27,10 @@ XycLOps (**Xyc**e **L**oop **Op**timizer **s**ystem) is a desktop application th
 
 ## 🛠️ System Requirements
 
-1.  **Operating System:** Windows 10/11, macOS, or Linux.
-2.  **Python:** Version **3.10** or higher.
-3.  **Simulator:** Xyce must be installed and added to your system's `PATH`.
-    * Verification: Open a terminal and type `Xyce -v`.
+1. **Operating System:** Windows 10/11, macOS, or Linux.
+2. **Python:** Version **3.10** or higher.
+3. **Simulator:** Xyce must be installed and added to your system’s `PATH`.
+   * *Verification:* Open a terminal and type `Xyce -v`.
 
 ---
 
@@ -41,120 +41,109 @@ It is recommended to run XycLOps II in a virtual environment to manage dependenc
 ### 1. Setup Virtual Environment
 
 **Windows:**
+```powershell
+# Create the environment
+python -m venv xyclopsvenv
 
-    # Create the environment
-    python -m venv xyclopsvenv
-
-    # Activate it
-    .\xyclopsvenv\Scripts\activate
+# Activate it
+.\xyclopsvenv\Scripts\activate
+```
 
 **macOS / Linux:**
+```bash
+# Create the environment
+python3 -m venv xyclopsvenv
 
-    # Create the environment
-    python3 -m venv xyclopsvenv
-
-    # Activate it
-    source xyclopsvenv/bin/activate
+# Activate it
+source xyclopsvenv/bin/activate
+```
 
 ### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
 
-    pip install -r requirements.txt
-
------
+---
 
 ## 🚀 Running the Application
 
-To launch the XycLOps II user interface:
+```bash
+# Ensure your virtual environment is active!
+python main_app.py
+```
 
-    # Ensure your virtual environment is active!
-    python main_app.py
+> **Note for Windows Users:** `multiprocessing.freeze_support()` makes it safe to package with PyInstaller.
 
-> **Note for Windows Users:** The application includes `multiprocessing.freeze_support()` handling, making it safe to package with PyInstaller if needed.
-
------
+---
 
 ## 📖 User Workflows
 
 ### 1. Upload Netlist
-
-  * Click **"Upload Netlist"** and select a valid SPICE file (`.cir`, `.net`, `.txt`).
-  * The system parses components and automatically clears previous session state.
+* Click **"Upload Netlist"** and select a valid SPICE file (`.cir`, `.net`, `.txt`).
+* The system parses components and resets stale session state.
 
 ### 2. Parameter Selection
-
-  * The tool lists available components.
-  * Select the components (e.g., `R1`, `C3`) you want the optimizer to tune.
+* The tool lists all tunable components.
+* Select parts (e.g., `R1`, `C3`) for parameter optimization.
 
 ### 3. Optimization Settings
 
-Choose your analysis type and configure targets:
-
 #### 📈 Transient Analysis
-
-  * Settings: Configure `Stop Time`, `Time Step`, `Start Time`, and `Max Step`.
-  * UIC: Toggle "Use Initial Conditions" to bypass DC operating point calculation.
-  * Target: Use the **Heaviside Editor** to visually draw a step response target (e.g., 0V to 5V rise).
+* Configure: `Stop Time`, `Time Step`, `Start Time`, `Max Step`
+* Toggle **UIC** to skip operating point calculation
+* Set a visual target using the **Heaviside Editor**
 
 #### 🔊 AC Analysis
-
-  * Settings: Select **Sweep Type** (DEC/LIN/OCT) and frequency range (Start/Stop Hz).
-  * Target: Upload a CSV defining the target Bode plot (Gain vs. Frequency).
-  * Response: Optimize for Magnitude (dB), Phase, or Real/Imaginary parts.
+* Configure sweep type (**DEC/LIN/OCT**) and frequency range
+* Upload a target Bode CSV (Gain vs. Frequency)
+* Response metric: **Magnitude (dB)** or **Phase**
 
 #### 📉 Noise Analysis
-
-  * Settings: Select **Output Node** (e.g., `V(out)`) and **Input Source**.
-  * Target: Define a target noise floor (e.g., 10 nV/√Hz).
-  * Quantity: Optimize for **Output Noise** (`onoise`) or **Input Referred Noise** (`inoise`).
+* Select **Output Node** and **Input Source**
+* Target a noise spectrum (e.g., `10 nV/√Hz`)
+* Optimize **onoise** or **inoise**
 
 ### 4. Run & Monitor
+* Click **Begin Optimization**
+* Real-time simulation overlay on target plot
+* Live backend logs in sidebar
+* A convergence window shows optimization progress
 
-  * Click **"Begin Optimization"**.
-  * The **Dashboard** shows a real-time plot of the simulation vs. your target.
-  * A **Sidebar** streams logs from the backend.
-  * A floating **Convergence Window** displays real-time improvement percentage.
-
------
+---
 
 ## 🔧 Developer Tools & Testing
 
-XycLOps II includes utilities for profiling and regression testing.
-
 ### Startup Profiler
-
-Measure import overhead and diagnose slow launches:
-
-    python analyze_startup_time.py
+```bash
+python analyze_startup_time.py
+```
 
 ### Stress Test Harnesses
+Located in `backend/manual_tests/`
 
-Headless scripts located in `backend/manual_tests/` verify solver behavior without the UI.
+*Transient Test*
+```bash
+python -m backend.manual_tests.long_instr_amp_test
+```
 
-  * **Transient Stress Test:**
+*AC Test*
+```bash
+python -m backend.manual_tests.long_instr_amp_ac_test
+```
 
-        python -m backend.manual_tests.long_instr_amp_test
-
-    *Optimizes a 7-variable Instrumentation Amplifier with strict tolerances (1e-14).*
-
-  * **AC Stress Test:**
-
-        python -m backend.manual_tests.long_instr_amp_ac_test
-
-    *Performs frequency domain optimization from 10 Hz to 1 MHz.*
-
------
+---
 
 ## 📂 Project Structure
 
-  * `main_app.py`: Application entry point.
-  * `frontend/`: UI code (Tkinter), including `ui_theme.py` and `visual_curve_editors.py`.
-  * `backend/`: Core logic. `curvefit_optimization.py` (solver) and `netlist_parse.py` (SPICE parser).
-  * `runs/`: Automatically generated session logs and result artifacts.
+* `main_app.py` — Application entry
+* `frontend/` — UI (Tkinter)  
+* `backend/` — Optimization + netlist parsing  
+* `runs/` — Auto-generated outputs & logs
 
------
+---
 
 ## ⚠️ Troubleshooting
 
-  * **"Xyce not found"**: Ensure the path to the Xyce executable is in system environment variables.
-  * **Flatlined Graphs**: Try enabling **"Default Bounds"** in settings to widen the search space.
-  * **Slow Startup**: Run the startup profiler script to identify which library causes delays.
+* **“Xyce not found”** → Ensure Xyce is added to PATH
+* **Flatlined graph** → Enable **Default Bounds**
+* **Slow startup** → Use `analyze_startup_time.py`
