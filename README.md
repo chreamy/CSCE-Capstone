@@ -16,12 +16,30 @@ XycLOps (**Xyc**e **L**oop **Op**timizer **s**ystem) is a desktop application th
 
 ## ✨ Key Features in v2.0
 
-* **Multi-Physics Support:** Optimize circuits for Time-Domain (Transient), Frequency Response (AC), and Noise Spectral Density.
-* **Visual Target Editors:** Draw step responses and piecewise-linear curves interactively instead of manually creating CSV files. Includes a one-click "Apply to Target" workflow.
-* **Modern UI:** A centralized theming engine provides a clean, professional interface with real-time plotting.
-* **Workspace-Aware Logging:** Automated session management organizes logs and results into versioned folders (`netlist-results/<netlist>/<session>`).
-* **Robust Parsing:** Enhanced support for LTSpice-style `.PARAM` definitions, complex netlist hierarchies, and UTF-8-SIG encoding.
-* **Safe Execution:** Dedicated background threading for the solver ensures the UI never freezes, with a robust "Abort" capability.
+* **Multi-Physics Engine**  
+  Expand beyond traditional transient simulations: optimize circuits across **Time-Domain**, **AC Frequency Response**, and **Noise Spectral Density** — all within a unified workflow.
+
+* **Asynchronous Threading Architecture**  
+  The solver now runs on a **dedicated background thread**, fully decoupled from the UI. The application remains smooth and interactable even during heavy multi-physics optimization sweeps.
+
+* **Interactive Visual Target Editors**  
+  Design target behaviors **by drawing directly on the plot** — step inputs, piecewise-linear shapes, and custom responses. A fast **“Apply to Target”** button instantly converts visuals into optimization goals.
+
+* **Data Stream Optimization**  
+  Smart **plot downsampling** (100k+ point support) prevents GUI lag while maintaining visually accurate waveforms — ideal for long transient runs and wide-band AC sweeps.
+
+* **Safe Process Management**  
+  A robust, thread-safe **Abort** system empowers users to immediately cancel simulations without crashes or orphaned processes.
+
+* **Modern UI Framework**  
+  A centralized theming engine replaces default Tkinter visuals with a polished, professional interface utilizing real-time plotting and flat UI design.
+
+* **Workspace-Aware Logging**  
+  Every optimization session auto-generates timestamped, versioned directories under  
+  `netlist-results/<netlist>/<session>` — ensuring clean organization and preserving previous results.
+
+* **Robust SPICE Parser**  
+  Enhanced compatibility with LTSpice-style `.PARAM` usage.
 
 ---
 
