@@ -98,7 +98,6 @@ class CurveFitSettings(tk.Frame):
         self.ac_response = "magnitude"
         self.ac_response_options = {
             "magnitude": "Magnitude",
-            "magnitude_db": "Magnitude (dB)",
             "phase": "Phase",
         }
 
